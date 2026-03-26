@@ -130,15 +130,15 @@ async def setticketpanel(ctx, channel: discord.TextChannel):
     
     # Wyślij panel ticketów na kanał
     embed = discord.Embed(
-        title="🎫 System Ticketów",
+        title="🎫Ticket",
         description="Kliknij przycisk poniżej, aby otworzyć ticket z podaniem.",
         color=discord.Color.blue()
     )
-    embed.add_field(name="📝 Co to jest?", value="Ticket to prywatny kanał, gdzie możesz porozmawiać z rekrutacją.", inline=False)
-    embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Otwórz Ticket'** poniżej.", inline=False)
+    embed.add_field(name="📝 Miejsce w którym napiszesz swoje podanie.", inline=False)
+    embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Podanie'** poniżej.", inline=False)
     
     view = discord.ui.View(timeout=None)
-    button = discord.ui.Button(label="🎫 Otwórz Ticket", style=discord.ButtonStyle.primary, custom_id="create_ticket")
+    button = discord.ui.Button(label="🎫 Podanie", style=discord.ButtonStyle.primary, custom_id="create_ticket")
     
     async def button_callback(interaction):
         await create_ticket(interaction)
@@ -207,7 +207,7 @@ async def create_ticket(interaction):
         description=f"Witaj {interaction.user.mention}!",
         color=discord.Color.green()
     )
-    embed.add_field(name="📝 Opisz swoją sprawę", value="Napisz poniżej swoją wiadomość. Rekrutacja odpowie tak szybko jak to możliwe.", inline=False)
+    embed.add_field(name="📝 Napisz podanie", value="Napisz podanie z wzorem z kanału #《📋》wzórˑpodania.", inline=False)
     embed.add_field(name="🔒 Zamknięcie ticketu", value="Gdy sprawa zostanie rozwiązana, użyj przycisku 'Zamknij Ticket' poniżej.", inline=False)
     
     close_button = discord.ui.Button(label="🔒 Zamknij Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
