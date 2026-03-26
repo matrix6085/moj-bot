@@ -772,7 +772,83 @@ async def helpme(ctx):
     await ctx.send(embed=embed)
 
 # ========== PROSTE KOMENDY ==========
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def testticketconfig(ctx):
+    """Testuje konfigurację ticketów"""
+    config = load_config()
+    
+    embed = discord.Embed(
+        title="🔧 Test konfiguracji ticketów",
+        color=discord.Color.blue()
+    )
+    
+    # Sprawdź kategorię
+    if config.get("ticket_category"):
+        category = ctx.guild.get_channel(config["ticket_category"])
+        if category:
+            embed.add_field(name="✅ Kategoria", value=f"{category.name} (ID: {category.id})", inline=False)
+        else:
+            embed.add_field(name="❌ Kategoria", value=f"Nie znaleziono kategorii o ID: {config['ticket_category']}", inline=False)
+    else:
+        embed.add_field(name="❌ Kategoria", value="Nie ustawiona", inline=False)
+    
+    # Sprawdź kanał panelu
+    if config.get("ticket_panel_channel"):
+        channel = ctx.guild.get_channel(config["ticket_panel_channel"])
+        if channel:
+            embed.add_field(name="✅ Kanał panelu", value=f"{channel.mention} (ID: {channel.id})", inline=False)
+        else:
+            embed.add_field(name="❌ Kanał panelu", value=f"Nie znaleziono kanału o ID: {config['ticket_panel_channel']}", inline=False)
+    else:
+        embed.add_field(name="❌ Kanał panelu", value="Nie ustawiony", inline=False)
+    
+    await ctx.send(embed=embed)
+    await ctx.message.delete()
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def manualticketpanel(ctx, channel: discord.TextChannel):
+    """Ręcznie wysyła panel ticketów na wskazany kanał"""
+    embed = discord.Embed(
+        title="🎫 System Ticketów",
+        description="Kliknij przycisk poniżej, aby otworzyć ticket z podaniem.",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="📝 Co to jest?", value="Ticket to prywatny kanał, gdzie możesz porozmawiać z rekrutacją.", inline=False)
+    embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Otwórz Ticket'** poniżej.", inline=False)
+    
+    view = discord.ui.View(timeout=None)
+    button = discord.ui.Button(label="🎫 Otwórz Ticket", style=discord.ButtonStyle.primary, custom_id="create_ticket")
+    
+    async def button_callback(interaction):
+        await create_ticket(interaction)
+    
+    button.callback = button_callback
+    view.add_item(button)
+    
+    await channel.send(embed=embed, view=view)
+    await ctx.send(f"✅ Panel ticketów został wysłany na {channel.mention}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setticketcategoryid(ctx, category_id: int):
+    """Ustawia kategorię dla ticketów używając ID
+    Użycie: !setticketcategoryid 123456789012345678"""
+    
+    config = load_config()
+    config["ticket_category"] = category_id
+    save_config(config)
+    
+    # Sprawdź czy kategoria istnieje
+    category = ctx.guild.get_channel(category_id)
+    if category:
+        await ctx.send(f"✅ Ustawiono kategorię ticketów na {category.name} (ID: {category_id})")
+    else:
+        await ctx.send(f"⚠️ Ustawiono ID {category_id}, ale nie znaleziono kategorii. Sprawdź czy ID jest poprawny.")
+    
+    await ctx.message.delete()
 @bot.command()
 async def ping(ctx):
     """Sprawdza opóźnienie bota"""
