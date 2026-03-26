@@ -612,7 +612,62 @@ async def hello(ctx):
 async def say(ctx, *, wiadomosc):
     await ctx.message.delete()
     await ctx.send(wiadomosc)
+# ========== KOMENDA REKRUTACJA OPEN ==========
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def rekrutacja_open(ctx):
+    """Wysyła ogłoszenie o otwarciu rekrutacji"""
+    
+    ROLE_ID = 1486772105965207725
+    role = ctx.guild.get_role(ROLE_ID)
+    
+    if not role:
+        await ctx.send("❌ Nie znaleziono roli!")
+        await ctx.message.delete()
+        return
+    
+    embed = discord.Embed(
+        title="🔴 REKRUTACJA OTWARTA!",
+        description="Rekrutacja została właśnie otwarta!",
+        color=discord.Color.red()
+    )
+    embed.add_field(
+        name="📝 Jak wziąć udział?",
+        value="Wejdź na kanał **poczekalnia** i kliknij przycisk **'Podanie'**.",
+        inline=False
+    )
+    embed.add_field(
+        name="⏰ Czas trwania",
+        value="Rekrutacja będzie otwarta przez ograniczony czas. Nie zwlekaj!",
+        inline=False
+    )
+    embed.set_footer(text="Powodzenia!")
+    
+    await ctx.send(f"{role.mention} 🔴 **REKRUTACJA OTWARTA!** 🔴")
+    await ctx.send(embed=embed)
+    await ctx.message.delete()
+    print("✅ Komenda rekrutacja_open wykonana!")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def rekrutacja_closed(ctx):
+    """Wysyła ogłoszenie o zamknięciu rekrutacji"""
+    
+    embed = discord.Embed(
+        title="⚫ REKRUTACJA ZAMKNIĘTA",
+        description="Rekrutacja została właśnie zamknięta.",
+        color=discord.Color.dark_gray()
+    )
+    embed.add_field(
+        name="📝 Co dalej?",
+        value="Dziękujemy wszystkim za udział!",
+        inline=False
+    )
+    
+    await ctx.send(embed=embed)
+    await ctx.message.delete()
+    print("✅ Komenda rekrutacja_closed wykonana!")
 # ========== URUCHOMIENIE ==========
 
 if __name__ == "__main__":
