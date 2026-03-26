@@ -141,8 +141,8 @@ async def send_ticket_panel(channel):
         description="Kliknij przycisk poniżej, aby napisać podanie.",
         color=discord.Color.green()
     )
-    embed.add_field(name="📝 Napisz Podanie", value="Użyj wzoru z kanału #《📋》wzórˑpodania", inline=False)
-    embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Otwórz Ticket'** poniżej.", inline=False)
+    embed.add_field(name="📝 Napisz Podanie", value="Użyj wzoru z kanału《📋》wzórˑpodania", inline=False)
+    embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Podanie'** poniżej.", inline=False)
     embed.set_footer(text="Możesz mieć tylko jeden otwarty ticket na raz!")
     
     view = discord.ui.View(timeout=None)
@@ -238,8 +238,8 @@ async def create_ticket(interaction):
             description=f"Witaj {interaction.user.mention}!",
             color=discord.Color.green()
         )
-        embed.add_field(name="📝 Opisz swoją sprawę", value="Napisz poniżej swoją wiadomość. Rekrutacja odpowie tak szybko jak to możliwe.", inline=False)
-        embed.add_field(name="🔒 Zamknięcie ticketu", value="Gdy sprawa zostanie rozwiązana, kliknij przycisk 'Zamknij Ticket' poniżej.", inline=False)
+        embed.add_field(name="📝 Postaraj sie z podaniem", value="Wkrótce ktoś sprawdzi twoje podanie.", inline=False)
+        embed.add_field(name="🔒 Zamknięcie ticketu", value="Gdy podanie zostanie rozpatrzone kliknij 'Zamknij Ticket' poniżej.", inline=False)
         
         close_button = discord.ui.Button(label="🔒 Zamknij Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
         
