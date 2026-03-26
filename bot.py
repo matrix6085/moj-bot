@@ -128,7 +128,7 @@ async def send_ticket_panel(channel):
         description="Kliknij przycisk poniżej, aby napisać podanie.",
         color=discord.Color.green()
     )
-    embed.add_field(name="📝 Napisz Podanie", value="Użyj wzoru z kanału《📋》wzórˑpodania", inline=False)
+    embed.add_field(name="📝 Napisz Podanie", value="Użyj wzoru z kanału wzór-podania", inline=False)
     embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Podanie'** poniżej.", inline=False)
     embed.set_footer(text="Możesz mieć tylko jeden otwarty ticket na raz!")
     
@@ -313,6 +313,15 @@ async def setvoicechannel(ctx, channel: discord.VoiceChannel):
     config["voice_channel"] = channel.id
     save_config(config)
     await ctx.send(f"✅ Ustawiono kanał głosowy na {channel.mention}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setrecruitmentrole(ctx, role: discord.Role):
+    config = load_config()
+    config["recruitment_role"] = role.id
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono rolę rekrutacyjną na {role.mention}")
     await ctx.message.delete()
 
 @bot.command()
@@ -542,40 +551,24 @@ async def etap2(ctx, status: str, member: discord.Member):
 
 # ========== KOMENDY REKRUTACJI ==========
 
-RECRUITMENT_ROLE_ID = None
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setrecruitmentrole(ctx, role: discord.Role):
-    global RECRUITMENT_ROLE_ID
-    RECRUITMENT_ROLE_ID = role.id
-    config = load_config()
-    config["recruitment_role"] = role.id
-    save_config(config)
-    await ctx.send(f"✅ Ustawiono rolę rekrutacyjną na {role.mention}")
-    await ctx.message.delete()
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def rekrutacja_open(ctx):
-    global RECRUITMENT_ROLE_ID
+    """Wysyła ogłoszenie o otwarciu rekrutacji"""
+    config = load_config()
     
-    if not RECRUITMENT_ROLE_ID:
-        config = load_config()
-        RECRUITMENT_ROLE_ID = config.get("recruitment_role")
-    
-    if not RECRUITMENT_ROLE_ID:
+    recruitment_role_id = config.get("recruitment_role")
+    if not recruitment_role_id:
         await ctx.send("❌ Nie ustawiono roli do pingowania! Użyj `!setrecruitmentrole @rola`")
         await ctx.message.delete()
         return
     
-    role = ctx.guild.get_role(RECRUITMENT_ROLE_ID)
+    role = ctx.guild.get_role(recruitment_role_id)
     if not role:
-        await ctx.send("❌ Nie znaleziono roli! Ustaw ją ponownie używając `!setrecruitmentrole @rola`")
+        await ctx.send("❌ Nie znaleziono roli! Ustaw ją ponownie.")
         await ctx.message.delete()
         return
     
-    config = load_config()
     voice_channel = None
     if config.get("voice_channel"):
         voice_channel = bot.get_channel(config["voice_channel"])
@@ -602,6 +595,7 @@ async def rekrutacja_open(ctx):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def rekrutacja_closed(ctx):
+    """Wysyła ogłoszenie o zamknięciu rekrutacji"""
     embed = discord.Embed(
         title="⚫ REKRUTACJA ZAMKNIĘTA",
         description="Rekrutacja została właśnie zamknięta.",
@@ -619,7 +613,8 @@ async def rekrutacja_closed(ctx):
 async def helpme(ctx):
     is_recruiter = is_recruiter_or_admin(ctx)
     
-    embed = discord.Embed(title="🤖 Pomoc - Dostępne komendy", description="Lista komend które możesz używać:", color=discord.Color.blue())
+    embed = discord.Embed(title="🤖 Pomoc - Dostępne komendy", color=discord.Color.blue())
+    
     embed.add_field(name="📌 Podstawowe:", value="`!ping` - sprawdza bota\n`!hello` - przywitanie\n`!helpme` - pokazuje tę pomoc", inline=False)
     
     if is_recruiter:
@@ -627,9 +622,9 @@ async def helpme(ctx):
     
     if ctx.author.guild_permissions.administrator:
         embed.add_field(name="⚙️ Konfiguracja serwera (admin):", 
-                        value="`!setwelcomechannel #kanał` - kanał powitalny\n`!setwelcomerole @rola` - rola dla nowych\n`!setacceptedrole @rola` - rola po akceptacji\n`!setetap2role1 @rola` - pierwsza rola po 2 etapie\n`!setetap2role2 @rola` - druga rola po 2 etapie\n`!setremoverole @rola` - rola do usunięcia\n`!setticketcategory ID` - kategoria ticketów\n`!setticketpanel #kanał` - panel ticketów\n`!setvoicechannel #głosowy` - kanał głosowy\n`!showconfig` - pokazuje konfigurację", inline=False)
+                        value="`!setwelcomechannel #kanał` - kanał powitalny\n`!setwelcomerole @rola` - rola dla nowych\n`!setacceptedrole @rola` - rola po akceptacji\n`!setetap2role1 @rola` - pierwsza rola po 2 etapie\n`!setetap2role2 @rola` - druga rola po 2 etapie\n`!setremoverole @rola` - rola do usunięcia\n`!setticketcategory ID` - kategoria ticketów\n`!setticketpanel #kanał` - panel ticketów\n`!setvoicechannel #głosowy` - kanał głosowy\n`!setrecruitmentrole @rola` - rola do pingowania\n`!showconfig` - pokazuje konfigurację", inline=False)
         embed.add_field(name="👑 Zarządzanie rekrutantami (admin):", value="`!addrecruiter @user` - dodaje rekrutanta\n`!removerecruiter @user` - usuwa rekrutanta\n`!recruiters` - lista rekrutantów", inline=False)
-        embed.add_field(name="🔴 Komendy rekrutacji (admin):", value="`!setrecruitmentrole @rola` - ustawia rolę do pingowania\n`!rekrutacja-open` - otwiera rekrutację\n`!rekrutacja-closed` - zamyka rekrutację", inline=False)
+        embed.add_field(name="🔴 Komendy rekrutacji (admin):", value="`!rekrutacja-open` - otwiera rekrutację\n`!rekrutacja-closed` - zamyka rekrutację", inline=False)
         embed.add_field(name="🔧 Inne admin:", value="`!say [wiadomość]` - bot wysyła wiadomość", inline=False)
     
     await ctx.send(embed=embed)
