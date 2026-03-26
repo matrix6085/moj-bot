@@ -158,9 +158,100 @@ async def create_ticket(interaction):
     # Sprawdź czy użytkownik ma już otwarty ticket
     for ticket in tickets:
         if ticket["user_id"] == interaction.user.id and ticket["status"] == "open":
-            await interaction.response.send_message("❌ Masz już otwarty ticket! Zamknij go przed otwarciem nowego.", ephemeral=True)
+            # Znajdź kanał ticketu
+            channel = interaction.guild.get_channel(ticket["channel_id"])
+            if channel:
+                await interaction.response.send_message(
+                    f"❌ Masz już otwarty ticket! {channel.mention}\nZamknij go przed otwarciem nowego.", 
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Masz już otwarty ticket! Zamknij go przed otwarciem nowego.", 
+                    ephemeral=True
+                )
             return
     
+    # Znajdź kategorię
+    category = None
+    if config["ticket_category"]:
+        category = interaction.guild.get_channel(config["ticket_category"])
+    
+    # Stwórz kanał ticketu
+    overwrites = {
+        interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+        interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+    }
+    
+    # Dodaj rekrutantów i adminów
+    recruiters = load_recruiters()
+    for recruiter_id in recruiters:
+        recruiter = interaction.guild.get_member(recruiter_id)
+        if recruiter:
+            overwrites[recruiter] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+    
+    # Dodaj adminów
+    for member in interaction.guild.members:
+        if member.guild_permissions.administrator:
+            overwrites[member] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+    
+    # Utwórz kanał
+    channel = await interaction.guild.create_text_channel(
+        name=f"ticket-{interaction.user.name}",
+        category=category,
+        overwrites=overwrites
+    )
+    
+    # Zapisz ticket w bazie
+    ticket_data = {
+        "user_id": interaction.user.id,
+        "channel_id": channel.id,
+        "status": "open",
+        "created_at": datetime.now().isoformat()
+    }
+    tickets.append(ticket_data)
+    save_tickets(tickets)
+    
+    # Wyślij wiadomość powitalną w tickecie
+    embed = discord.Embed(
+        title="🎫 Ticket otwarty",
+        description=f"Witaj {interaction.user.mention}!",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="📝 Opisz swoją sprawę", value="Napisz poniżej swoją wiadomość. Rekrutacja odpowie tak szybko jak to możliwe.", inline=False)
+    embed.add_field(name="🔒 Zamknięcie ticketu", value="Gdy sprawa zostanie rozwiązana, użyj przycisku 'Zamknij Ticket' poniżej.", inline=False)
+    
+    close_button = discord.ui.Button(label="🔒 Zamknij Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
+    
+   async def close_ticket(interaction, channel):
+    """Zamyka ticket"""
+    tickets = load_tickets()
+    
+    # Aktualizuj status ticketu
+    for ticket in tickets:
+        if ticket["channel_id"] == channel.id:
+            ticket["status"] = "closed"
+            break
+    
+    save_tickets(tickets)
+    
+    embed = discord.Embed(
+        title="🔒 Ticket zamknięty",
+        description="Ten ticket zostanie usunięty za 5 sekund.",
+        color=discord.Color.red()
+    )
+    await channel.send(embed=embed)
+    
+    # Wyślij potwierdzenie do użytkownika (tylko jeśli to ten sam użytkownik)
+    try:
+        await interaction.response.send_message("✅ Ticket zostanie zamknięty.", ephemeral=True)
+    except:
+        pass
+    
+    # Usuń kanał po 5 sekundach
+    await asyncio.sleep(5)
+    await channel.delete() 
     # Znajdź kategorię
     category = None
     if config["ticket_category"]:
@@ -207,7 +298,7 @@ async def create_ticket(interaction):
         description=f"Witaj {interaction.user.mention}!",
         color=discord.Color.green()
     )
-    embed.add_field(name="📝 Napisz podanie", value="Napisz podanie z wzorem z kanału #《📋》wzórˑpodania.", inline=False)
+    embed.add_field(name="📝 Napisz podanie", value="Napisz podanie z wzorem z kanału #.", inline=False)
     embed.add_field(name="🔒 Zamknięcie ticketu", value="Gdy sprawa zostanie rozwiązana, użyj przycisku 'Zamknij Ticket' poniżej.", inline=False)
     
     close_button = discord.ui.Button(label="🔒 Zamknij Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
