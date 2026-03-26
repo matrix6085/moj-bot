@@ -137,16 +137,16 @@ async def setticketpanel(ctx, channel: discord.TextChannel):
 async def send_ticket_panel(channel):
     """Wysyła panel ticketów na wskazany kanał"""
     embed = discord.Embed(
-        title="🎫 System Ticketów - Podanie",
-        description="Kliknij przycisk poniżej, aby otworzyć ticket z podaniem.",
-        color=discord.Color.blue()
+        title="🎫 Podanie",
+        description="Kliknij przycisk poniżej, aby napisać podanie.",
+        color=discord.Color.green()
     )
-    embed.add_field(name="📝 Co to jest?", value="Ticket to prywatny kanał, gdzie możesz porozmawiać z rekrutacją.", inline=False)
+    embed.add_field(name="📝 Napisz Podanie", value="Użyj wzoru z kanału #《📋》wzórˑpodania", inline=False)
     embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Otwórz Ticket'** poniżej.", inline=False)
     embed.set_footer(text="Możesz mieć tylko jeden otwarty ticket na raz!")
     
     view = discord.ui.View(timeout=None)
-    button = discord.ui.Button(label="🎫 Otwórz Ticket", style=discord.ButtonStyle.primary, custom_id="create_ticket")
+    button = discord.ui.Button(label="🎫 Podanie", style=discord.ButtonStyle.primary, custom_id="create_ticket")
     
     async def button_callback(interaction):
         await create_ticket(interaction)
