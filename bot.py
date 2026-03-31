@@ -613,6 +613,468 @@ async def say(ctx, *, wiadomosc):
     await ctx.message.delete()
     await ctx.send(wiadomosc)
 
+# ========== SYSTEM URLOPÓW I NIEOBECNOŚCI REGRUP ==========
+
+# Plik do przechowywania wniosków
+LEAVE_FILE = "leaves.json"
+
+def load_leaves():
+    try:
+        with open(LEAVE_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_leaves(leaves):
+    with open(LEAVE_FILE, "w") as f:
+        json.dump(leaves, f)
+
+# Zmienne konfiguracyjne
+leave_config = {
+    "leave_channel": None,
+    "regroup_channel": None,
+    "leave_panel_channel": None,
+    "regroup_panel_channel": None,
+    "leave_role": None,
+    "regroup_role": None
+}
+
+# ========== KOMENDY KONFIGURACYJNE ==========
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setleavechannel(ctx, channel: discord.TextChannel):
+    """Ustawia kanał gdzie będą wysyłane wnioski urlopowe do akceptacji"""
+    leave_config["leave_channel"] = channel.id
+    await ctx.send(f"✅ Ustawiono kanał wniosków urlopowych na {channel.mention}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setregroupchannel(ctx, channel: discord.TextChannel):
+    """Ustawia kanał gdzie będą wysyłane wnioski regrup do akceptacji"""
+    leave_config["regroup_channel"] = channel.id
+    await ctx.send(f"✅ Ustawiono kanał wniosków regrup na {channel.mention}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setleavepanel(ctx, channel: discord.TextChannel):
+    """Ustawia kanał z panelem urlopów"""
+    leave_config["leave_panel_channel"] = channel.id
+    await send_leave_panel(channel)
+    await ctx.send(f"✅ Panel urlopów został wysłany na {channel.mention}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setregrouppanel(ctx, channel: discord.TextChannel):
+    """Ustawia kanał z panelem nieobecności regrup"""
+    leave_config["regroup_panel_channel"] = channel.id
+    await send_regroup_panel(channel)
+    await ctx.send(f"✅ Panel nieobecności regrup został wysłany na {channel.mention}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setleaverole(ctx, role: discord.Role):
+    """Ustawia rolę nadawaną po zaakceptowaniu urlopu"""
+    leave_config["leave_role"] = role.id
+    await ctx.send(f"✅ Ustawiono rolę urlopową na {role.mention}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setregrouprole(ctx, role: discord.Role):
+    """Ustawia rolę nadawaną po zaakceptowaniu nieobecności regrup"""
+    leave_config["regroup_role"] = role.id
+    await ctx.send(f"✅ Ustawiono rolę regrup na {role.mention}")
+    await ctx.message.delete()
+
+# ========== WYSYŁANIE PANELI ==========
+
+async def send_leave_panel(channel):
+    """Wysyła panel urlopów"""
+    embed = discord.Embed(
+        title="📝 WNIOSEK URLOPOWY",
+        description="Kliknij przycisk poniżej, aby złożyć wniosek urlopowy.",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="📋 Informacja", value="Wypełnij formularz, a Twoja prośba zostanie rozpatrzona.", inline=False)
+    
+    view = discord.ui.View(timeout=None)
+    button = discord.ui.Button(label="📝 Złóż wniosek urlopowy", style=discord.ButtonStyle.primary, custom_id="leave_request")
+    
+    async def button_callback(interaction):
+        await start_leave_request(interaction)
+    
+    button.callback = button_callback
+    view.add_item(button)
+    await channel.send(embed=embed, view=view)
+
+async def send_regroup_panel(channel):
+    """Wysyła panel nieobecności regrup"""
+    embed = discord.Embed(
+        title="⚠️ NIEOBECNOŚĆ REGRUP",
+        description="Kliknij przycisk poniżej, aby zgłosić nieobecność na regrupie.",
+        color=discord.Color.orange()
+    )
+    embed.add_field(name="📋 Informacja", value="Wypełnij formularz, aby zgłosić nieobecność.", inline=False)
+    
+    view = discord.ui.View(timeout=None)
+    button = discord.ui.Button(label="⚠️ Zgłoś nieobecność", style=discord.ButtonStyle.danger, custom_id="regroup_request")
+    
+    async def button_callback(interaction):
+        await start_regroup_request(interaction)
+    
+    button.callback = button_callback
+    view.add_item(button)
+    await channel.send(embed=embed, view=view)
+
+# ========== FORMULARZE ==========
+
+async def start_leave_request(interaction):
+    """Rozpoczyna proces składania wniosku urlopowego"""
+    modal = discord.ui.Modal(title="📝 Wniosek urlopowy")
+    
+    modal.add_item(discord.ui.TextInput(
+        label="Kto składa wniosek?",
+        placeholder="Twoja nazwa lub nick",
+        required=True,
+        max_length=100
+    ))
+    
+    modal.add_item(discord.ui.TextInput(
+        label="Od kiedy? (data)",
+        placeholder="DD.MM.YYYY",
+        required=True,
+        max_length=20
+    ))
+    
+    modal.add_item(discord.ui.TextInput(
+        label="Do kiedy? (data)",
+        placeholder="DD.MM.YYYY",
+        required=True,
+        max_length=20
+    ))
+    
+    modal.add_item(discord.ui.TextInput(
+        label="Powód urlopu",
+        placeholder="Napisz powód...",
+        required=True,
+        style=discord.TextStyle.paragraph,
+        max_length=500
+    ))
+    
+    async def modal_callback(interaction_modal):
+        await submit_leave_request(interaction_modal, modal.children)
+    
+    modal.on_submit = modal_callback
+    await interaction.response.send_modal(modal)
+
+async def start_regroup_request(interaction):
+    """Rozpoczyna proces zgłaszania nieobecności regrup"""
+    modal = discord.ui.Modal(title="⚠️ Nieobecność regrup")
+    
+    modal.add_item(discord.ui.TextInput(
+        label="Kto zgłasza nieobecność?",
+        placeholder="Twoja nazwa lub nick",
+        required=True,
+        max_length=100
+    ))
+    
+    modal.add_item(discord.ui.TextInput(
+        label="Z jakiego dnia?",
+        placeholder="DD.MM.YYYY",
+        required=True,
+        max_length=20
+    ))
+    
+    modal.add_item(discord.ui.TextInput(
+        label="Powód nieobecności",
+        placeholder="Napisz powód...",
+        required=True,
+        style=discord.TextStyle.paragraph,
+        max_length=500
+    ))
+    
+    async def modal_callback(interaction_modal):
+        await submit_regroup_request(interaction_modal, modal.children)
+    
+    modal.on_submit = modal_callback
+    await interaction.response.send_modal(modal)
+
+# ========== WYSYŁANIE WNIOSKÓW ==========
+
+async def submit_leave_request(interaction, fields):
+    """Wysyła wniosek urlopowy do akceptacji"""
+    kto = fields[0].value
+    od = fields[1].value
+    do = fields[2].value
+    powod = fields[3].value
+    
+    leaves = load_leaves()
+    request_id = len(leaves) + 1
+    
+    request_data = {
+        "id": request_id,
+        "type": "leave",
+        "user_id": interaction.user.id,
+        "user_name": interaction.user.name,
+        "kto": kto,
+        "od": od,
+        "do": do,
+        "powod": powod,
+        "status": "pending",
+        "created_at": datetime.now().isoformat()
+    }
+    leaves.append(request_data)
+    save_leaves(leaves)
+    
+    # Wyślij do akceptacji
+    channel_id = leave_config.get("leave_channel")
+    if channel_id:
+        channel = interaction.guild.get_channel(channel_id)
+        if channel:
+            embed = discord.Embed(
+                title="📝 NOWY WNIOSEK URLOPOWY",
+                description=f"**ID:** {request_id}",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="👤 Kto", value=kto, inline=True)
+            embed.add_field(name="📅 Od", value=od, inline=True)
+            embed.add_field(name="📅 Do", value=do, inline=True)
+            embed.add_field(name="📋 Powód", value=powod, inline=False)
+            embed.add_field(name="👤 Zgłaszający", value=interaction.user.mention, inline=False)
+            embed.set_footer(text="Użyj przycisków poniżej do zaakceptowania lub odrzucenia")
+            
+            view = discord.ui.View(timeout=None)
+            
+            accept_button = discord.ui.Button(label="✅ Akceptuj", style=discord.ButtonStyle.success, custom_id=f"accept_leave_{request_id}")
+            reject_button = discord.ui.Button(label="❌ Odrzuć", style=discord.ButtonStyle.danger, custom_id=f"reject_leave_{request_id}")
+            
+            async def accept_callback(interaction_accept):
+                await accept_leave_request(interaction_accept, request_id)
+            
+            async def reject_callback(interaction_reject):
+                await reject_leave_request(interaction_reject, request_id)
+            
+            accept_button.callback = accept_callback
+            reject_button.callback = reject_callback
+            
+            view.add_item(accept_button)
+            view.add_item(reject_button)
+            
+            await channel.send(embed=embed, view=view)
+    
+    await interaction.response.send_message("✅ Twój wniosek urlopowy został wysłany do rozpatrzenia!", ephemeral=True)
+
+async def submit_regroup_request(interaction, fields):
+    """Wysyła wniosek nieobecności regrup do akceptacji"""
+    kto = fields[0].value
+    dzien = fields[1].value
+    powod = fields[2].value
+    
+    leaves = load_leaves()
+    request_id = len(leaves) + 1
+    
+    request_data = {
+        "id": request_id,
+        "type": "regroup",
+        "user_id": interaction.user.id,
+        "user_name": interaction.user.name,
+        "kto": kto,
+        "dzien": dzien,
+        "powod": powod,
+        "status": "pending",
+        "created_at": datetime.now().isoformat()
+    }
+    leaves.append(request_data)
+    save_leaves(leaves)
+    
+    # Wyślij do akceptacji
+    channel_id = leave_config.get("regroup_channel")
+    if channel_id:
+        channel = interaction.guild.get_channel(channel_id)
+        if channel:
+            embed = discord.Embed(
+                title="⚠️ NOWA NIEOBECNOŚĆ REGRUP",
+                description=f"**ID:** {request_id}",
+                color=discord.Color.orange()
+            )
+            embed.add_field(name="👤 Kto", value=kto, inline=True)
+            embed.add_field(name="📅 Dzień", value=dzien, inline=True)
+            embed.add_field(name="📋 Powód", value=powod, inline=False)
+            embed.add_field(name="👤 Zgłaszający", value=interaction.user.mention, inline=False)
+            embed.set_footer(text="Użyj przycisków poniżej do zaakceptowania lub odrzucenia")
+            
+            view = discord.ui.View(timeout=None)
+            
+            accept_button = discord.ui.Button(label="✅ Akceptuj", style=discord.ButtonStyle.success, custom_id=f"accept_regroup_{request_id}")
+            reject_button = discord.ui.Button(label="❌ Odrzuć", style=discord.ButtonStyle.danger, custom_id=f"reject_regroup_{request_id}")
+            
+            async def accept_callback(interaction_accept):
+                await accept_regroup_request(interaction_accept, request_id)
+            
+            async def reject_callback(interaction_reject):
+                await reject_regroup_request(interaction_reject, request_id)
+            
+            accept_button.callback = accept_callback
+            reject_button.callback = reject_callback
+            
+            view.add_item(accept_button)
+            view.add_item(reject_button)
+            
+            await channel.send(embed=embed, view=view)
+    
+    await interaction.response.send_message("✅ Twoja nieobecność została zgłoszona do rozpatrzenia!", ephemeral=True)
+
+# ========== AKCEPTACJA I ODRZUCENIE ==========
+
+async def accept_leave_request(interaction, request_id):
+    """Akceptuje wniosek urlopowy"""
+    leaves = load_leaves()
+    user_id = None
+    
+    for leave in leaves:
+        if leave["id"] == request_id and leave["type"] == "leave":
+            leave["status"] = "accepted"
+            user_id = leave["user_id"]
+            break
+    
+    save_leaves(leaves)
+    
+    # Nadaj rolę
+    role_id = leave_config.get("leave_role")
+    if role_id and user_id:
+        role = interaction.guild.get_role(role_id)
+        if role:
+            member = interaction.guild.get_member(user_id)
+            if member:
+                try:
+                    await member.add_roles(role)
+                except:
+                    pass
+    
+    embed = discord.Embed(
+        title="✅ WNIOSEK ZAAKCEPTOWANY",
+        description=f"Wniosek urlopowy ID: {request_id} został zaakceptowany!",
+        color=discord.Color.green()
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    # Wyślij PW do użytkownika
+    if user_id:
+        user = interaction.guild.get_member(user_id)
+        if user:
+            try:
+                await user.send(f"✅ Twój wniosek urlopowy ID: {request_id} został zaakceptowany!")
+            except:
+                pass
+
+async def reject_leave_request(interaction, request_id):
+    """Odrzuca wniosek urlopowy"""
+    leaves = load_leaves()
+    user_id = None
+    
+    for leave in leaves:
+        if leave["id"] == request_id and leave["type"] == "leave":
+            leave["status"] = "rejected"
+            user_id = leave["user_id"]
+            break
+    
+    save_leaves(leaves)
+    
+    embed = discord.Embed(
+        title="❌ WNIOSEK ODRZUCONY",
+        description=f"Wniosek urlopowy ID: {request_id} został odrzucony!",
+        color=discord.Color.red()
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    # Wyślij PW do użytkownika
+    if user_id:
+        user = interaction.guild.get_member(user_id)
+        if user:
+            try:
+                await user.send(f"❌ Twój wniosek urlopowy ID: {request_id} został odrzucony!")
+            except:
+                pass
+
+async def accept_regroup_request(interaction, request_id):
+    """Akceptuje wniosek nieobecności regrup"""
+    leaves = load_leaves()
+    user_id = None
+    
+    for leave in leaves:
+        if leave["id"] == request_id and leave["type"] == "regroup":
+            leave["status"] = "accepted"
+            user_id = leave["user_id"]
+            break
+    
+    save_leaves(leaves)
+    
+    # Nadaj rolę
+    role_id = leave_config.get("regroup_role")
+    if role_id and user_id:
+        role = interaction.guild.get_role(role_id)
+        if role:
+            member = interaction.guild.get_member(user_id)
+            if member:
+                try:
+                    await member.add_roles(role)
+                except:
+                    pass
+    
+    embed = discord.Embed(
+        title="✅ NIEOBECNOŚĆ ZAAKCEPTOWANA",
+        description=f"Nieobecność regrup ID: {request_id} została zaakceptowana!",
+        color=discord.Color.green()
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    # Wyślij PW do użytkownika
+    if user_id:
+        user = interaction.guild.get_member(user_id)
+        if user:
+            try:
+                await user.send(f"✅ Twoja nieobecność regrup ID: {request_id} została zaakceptowana!")
+            except:
+                pass
+
+async def reject_regroup_request(interaction, request_id):
+    """Odrzuca wniosek nieobecności regrup"""
+    leaves = load_leaves()
+    user_id = None
+    
+    for leave in leaves:
+        if leave["id"] == request_id and leave["type"] == "regroup":
+            leave["status"] = "rejected"
+            user_id = leave["user_id"]
+            break
+    
+    save_leaves(leaves)
+    
+    embed = discord.Embed(
+        title="❌ NIEOBECNOŚĆ ODRZUCONA",
+        description=f"Nieobecność regrup ID: {request_id} została odrzucona!",
+        color=discord.Color.red()
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    # Wyślij PW do użytkownika
+    if user_id:
+        user = interaction.guild.get_member(user_id)
+        if user:
+            try:
+                await user.send(f"❌ Twoja nieobecność regrup ID: {request_id} została odrzucona!")
+            except:
+                pass
+
 # ========== URUCHOMIENIE ==========
 
 if __name__ == "__main__":
