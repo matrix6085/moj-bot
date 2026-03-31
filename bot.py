@@ -66,6 +66,9 @@ async def on_ready():
     print(f"✅ Zalogowano jako {bot.user}")
     print(f"🌐 Bot działa na {len(bot.guilds)} serwerach")
     print("------")
+    
+    # Uruchom pętlę sprawdzającą urlopy
+    bot.loop.create_task(check_expired_leaves())
 
 @bot.event
 async def on_member_join(member):
@@ -615,6 +618,9 @@ async def say(ctx, *, wiadomosc):
 
 # ========== SYSTEM URLOPÓW I NIEOBECNOŚCI REGRUP ==========
 
+import asyncio
+from datetime import datetime, timedelta
+
 # Plik do przechowywania wniosków
 LEAVE_FILE = "leaves.json"
 
@@ -638,6 +644,9 @@ leave_config = {
     "leave_role": None,
     "regroup_role": None
 }
+
+# Zbiór do przechowywania ID już przetworzonych przycisków (zabezpieczenie przed wielokrotną akceptacją)
+processed_buttons = set()
 
 # ========== KOMENDY KONFIGURACYJNE ==========
 
@@ -826,7 +835,8 @@ async def submit_leave_request(interaction, fields):
         "do": do,
         "powod": powod,
         "status": "pending",
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "processed": False
     }
     leaves.append(request_data)
     save_leaves(leaves)
@@ -887,7 +897,8 @@ async def submit_regroup_request(interaction, fields):
         "dzien": dzien,
         "powod": powod,
         "status": "pending",
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "processed": False
     }
     leaves.append(request_data)
     save_leaves(leaves)
@@ -929,20 +940,38 @@ async def submit_regroup_request(interaction, fields):
     
     await interaction.response.send_message("✅ Twoja nieobecność została zgłoszona do rozpatrzenia!", ephemeral=True)
 
-# ========== AKCEPTACJA I ODRZUCENIE ==========
+# ========== AKCEPTACJA I ODRZUCENIE (z zabezpieczeniem przed wielokrotną akceptacją) ==========
 
 async def accept_leave_request(interaction, request_id):
-    """Akceptuje wniosek urlopowy"""
+    """Akceptuje wniosek urlopowy - tylko raz"""
+    
+    # Zabezpieczenie przed wielokrotnym kliknięciem
+    button_id = f"accept_leave_{request_id}_{interaction.user.id}"
+    if button_id in processed_buttons:
+        await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
+        return
+    
+    processed_buttons.add(button_id)
+    
     leaves = load_leaves()
     user_id = None
     end_date_str = None
+    found = False
     
     for leave in leaves:
         if leave["id"] == request_id and leave["type"] == "leave":
+            if leave["status"] != "pending":
+                await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
+                return
             leave["status"] = "accepted"
             user_id = leave["user_id"]
             end_date_str = leave["do"]
+            found = True
             break
+    
+    if not found:
+        await interaction.response.send_message("❌ Nie znaleziono wniosku!", ephemeral=True)
+        return
     
     save_leaves(leaves)
     
@@ -956,38 +985,176 @@ async def accept_leave_request(interaction, request_id):
                 try:
                     await member.add_roles(role)
                     
-                    # Oblicz ile dni urlopu
-                    try:
-                        start_date = datetime.strptime(leave["od"], "%d.%m.%Y")
-                        end_date = datetime.strptime(end_date_str, "%d.%m.%Y")
-                        days = (end_date - start_date).days + 1
-                        
-                        embed = discord.Embed(
-                            title="✅ WNIOSEK ZAAKCEPTOWANY",
-                            description=f"Wniosek urlopowy ID: {request_id} został zaakceptowany!",
-                            color=discord.Color.green()
-                        )
-                        embed.add_field(name="📅 Okres urlopu", value=f"{leave['od']} - {leave['do']} ({days} dni)", inline=False)
-                        embed.add_field(name="👤 Rola", value=f"Nadano rolę {role.mention}", inline=False)
-                        embed.add_field(name="⏰ Automatyczne usunięcie", value=f"Rola zostanie automatycznie usunięta {leave['do']} po zakończeniu urlopu.", inline=False)
-                        
-                        await interaction.response.send_message(embed=embed, ephemeral=True)
-                    except:
-                        await interaction.response.send_message(f"✅ Wniosek urlopowy ID: {request_id} został zaakceptowany! Nadano rolę {role.mention}", ephemeral=True)
+                    embed = discord.Embed(
+                        title="✅ WNIOSEK ZAAKCEPTOWANY",
+                        description=f"Wniosek urlopowy ID: {request_id} został zaakceptowany!",
+                        color=discord.Color.green()
+                    )
+                    embed.add_field(name="👤 Użytkownik", value=member.mention, inline=True)
+                    embed.add_field(name="📅 Okres", value=f"{leave['od']} - {leave['do']}", inline=True)
+                    embed.add_field(name="👑 Nadana rola", value=role.mention, inline=False)
                     
-                    # Wyślij PW do użytkownika
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    
+                    # Wyślij PW
                     try:
-                        await member.send(f"✅ Twój wniosek urlopowy ID: {request_id} został zaakceptowany!\n📅 Okres: {leave['od']} - {leave['do']}\n👤 Otrzymałeś rolę: {role.name}\n⏰ Rola zostanie automatycznie usunięta po zakończeniu urlopu.")
+                        await member.send(f"✅ Twój wniosek urlopowy ID: {request_id} został zaakceptowany!\n📅 Okres: {leave['od']} - {leave['do']}\n👤 Otrzymałeś rolę: {role.name}")
                     except:
                         pass
                         
-                except:
-                    await interaction.response.send_message("❌ Nie udało się nadać roli!", ephemeral=True)
+                except Exception as e:
+                    await interaction.response.send_message(f"❌ Błąd przy nadawaniu roli: {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Nie znaleziono użytkownika!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Nie znaleziono roli!", ephemeral=True)
+    else:
+        await interaction.response.send_message("✅ Wniosek zaakceptowany (rola nie została ustawiona)", ephemeral=True)
+
+async def reject_leave_request(interaction, request_id):
+    """Odrzuca wniosek urlopowy - tylko raz"""
+    
+    # Zabezpieczenie przed wielokrotnym kliknięciem
+    button_id = f"reject_leave_{request_id}_{interaction.user.id}"
+    if button_id in processed_buttons:
+        await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
+        return
+    
+    processed_buttons.add(button_id)
+    
+    leaves = load_leaves()
+    user_id = None
+    
+    for leave in leaves:
+        if leave["id"] == request_id and leave["type"] == "leave":
+            if leave["status"] != "pending":
+                await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
+                return
+            leave["status"] = "rejected"
+            user_id = leave["user_id"]
+            break
+    
+    save_leaves(leaves)
+    
+    embed = discord.Embed(
+        title="❌ WNIOSEK ODRZUCONY",
+        description=f"Wniosek urlopowy ID: {request_id} został odrzucony!",
+        color=discord.Color.red()
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    # Wyślij PW
+    if user_id:
+        user = interaction.guild.get_member(user_id)
+        if user:
+            try:
+                await user.send(f"❌ Twój wniosek urlopowy ID: {request_id} został odrzucony!")
+            except:
+                pass
+
+async def accept_regroup_request(interaction, request_id):
+    """Akceptuje wniosek nieobecności regrup - tylko raz"""
+    
+    # Zabezpieczenie przed wielokrotnym kliknięciem
+    button_id = f"accept_regroup_{request_id}_{interaction.user.id}"
+    if button_id in processed_buttons:
+        await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
+        return
+    
+    processed_buttons.add(button_id)
+    
+    leaves = load_leaves()
+    user_id = None
+    
+    for leave in leaves:
+        if leave["id"] == request_id and leave["type"] == "regroup":
+            if leave["status"] != "pending":
+                await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
+                return
+            leave["status"] = "accepted"
+            user_id = leave["user_id"]
+            break
+    
+    save_leaves(leaves)
+    
+    # Nadaj rolę
+    role_id = leave_config.get("regroup_role")
+    if role_id and user_id:
+        role = interaction.guild.get_role(role_id)
+        if role:
+            member = interaction.guild.get_member(user_id)
+            if member:
+                try:
+                    await member.add_roles(role)
+                    
+                    embed = discord.Embed(
+                        title="✅ NIEOBECNOŚĆ ZAAKCEPTOWANA",
+                        description=f"Nieobecność regrup ID: {request_id} została zaakceptowana!",
+                        color=discord.Color.green()
+                    )
+                    embed.add_field(name="👤 Użytkownik", value=member.mention, inline=True)
+                    embed.add_field(name="📅 Dzień", value=leave["dzien"], inline=True)
+                    embed.add_field(name="👑 Nadana rola", value=role.mention, inline=False)
+                    
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    
+                    try:
+                        await member.send(f"✅ Twoja nieobecność regrup ID: {request_id} została zaakceptowana!\n📅 Dzień: {leave['dzien']}\n👤 Otrzymałeś rolę: {role.name}")
+                    except:
+                        pass
+                        
+                except Exception as e:
+                    await interaction.response.send_message(f"❌ Błąd przy nadawaniu roli: {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Nie znaleziono użytkownika!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Nie znaleziono roli!", ephemeral=True)
+    else:
+        await interaction.response.send_message("✅ Nieobecność zaakceptowana (rola nie została ustawiona)", ephemeral=True)
+
+async def reject_regroup_request(interaction, request_id):
+    """Odrzuca wniosek nieobecności regrup - tylko raz"""
+    
+    # Zabezpieczenie przed wielokrotnym kliknięciem
+    button_id = f"reject_regroup_{request_id}_{interaction.user.id}"
+    if button_id in processed_buttons:
+        await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
+        return
+    
+    processed_buttons.add(button_id)
+    
+    leaves = load_leaves()
+    user_id = None
+    
+    for leave in leaves:
+        if leave["id"] == request_id and leave["type"] == "regroup":
+            if leave["status"] != "pending":
+                await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
+                return
+            leave["status"] = "rejected"
+            user_id = leave["user_id"]
+            break
+    
+    save_leaves(leaves)
+    
+    embed = discord.Embed(
+        title="❌ NIEOBECNOŚĆ ODRZUCONA",
+        description=f"Nieobecność regrup ID: {request_id} została odrzucona!",
+        color=discord.Color.red()
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    if user_id:
+        user = interaction.guild.get_member(user_id)
+        if user:
+            try:
+                await user.send(f"❌ Twoja nieobecność regrup ID: {request_id} została odrzucona!")
+            except:
+                pass
 
 # ========== AUTOMATYCZNE USUWANIE ROLI PO URLOPIE ==========
-
-import asyncio
-from datetime import datetime, timedelta
 
 async def check_expired_leaves():
     """Sprawdza czy jakieś urlopy się skończyły i usuwa role"""
@@ -999,12 +1166,9 @@ async def check_expired_leaves():
             
             for leave in leaves:
                 if leave["type"] == "leave" and leave["status"] == "accepted":
-                    # Sprawdź czy urlop się skończył
                     try:
                         end_date = datetime.strptime(leave["do"], "%d.%m.%Y")
-                        # Jeśli data zakończenia jest przed dzisiaj
                         if end_date.date() < current_date.date():
-                            # Znajdź użytkownika i usuń rolę
                             for guild in bot.guilds:
                                 member = guild.get_member(leave["user_id"])
                                 if member:
@@ -1014,31 +1178,22 @@ async def check_expired_leaves():
                                         if role and role in member.roles:
                                             await member.remove_roles(role)
                                             print(f"Usunięto rolę urlopową użytkownikowi {member.name}")
-                                            
-                                            # Wyślij PW o zakończeniu urlopu
                                             try:
                                                 await member.send(f"✅ Twój urlop zakończył się {leave['do']}. Twoja rola urlopowa została usunięta.")
                                             except:
                                                 pass
-                                            
-                                            # Oznacz urlop jako zakończony
                                             leave["status"] = "ended"
                                             save_leaves(leaves)
                     except:
                         pass
             
-            # Sprawdzaj co godzinę
             await asyncio.sleep(3600)
             
         except Exception as e:
             print(f"Błąd w check_expired_leaves: {e}")
             await asyncio.sleep(3600)
 
-# Uruchom pętlę sprawdzającą w tle
-@bot.event
-async def on_ready():
-    # ... twój istniejący kod on_ready ...
-    bot.loop.create_task(check_expired_leaves())
+# ========== KOMENDY DO SPRAWDZANIA URLOPÓW ==========
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -1062,7 +1217,6 @@ async def checkleaves(ctx):
                                 await member.remove_roles(role)
                                 removed_count += 1
                                 leave["status"] = "ended"
-                                
                                 try:
                                     await member.send(f"✅ Twój urlop zakończył się {leave['do']}. Twoja rola urlopowa została usunięta.")
                                 except:
@@ -1073,50 +1227,46 @@ async def checkleaves(ctx):
     save_leaves(leaves)
     
     if removed_count > 0:
-        await ctx.send(f"✅ Usunięto rolę urlopową {removed_count} użytkownikom, których urlop się zakończył.")
+        await ctx.send(f"✅ Usunięto rolę urlopową {removed_count} użytkownikom.")
     else:
-        await ctx.send("📋 Brak zakończonych urlopów do przetworzenia.")
+        await ctx.send("📋 Brak zakończonych urlopów.")
     
     await ctx.message.delete()
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def checkleaves(ctx):
-    """Ręcznie sprawdza i usuwa role po zakończonych urlopach"""
+async def activeleaves(ctx):
+    """Pokazuje aktywne urlopy"""
     leaves = load_leaves()
     current_date = datetime.now()
-    removed_count = 0
+    active = []
     
     for leave in leaves:
         if leave["type"] == "leave" and leave["status"] == "accepted":
             try:
                 end_date = datetime.strptime(leave["do"], "%d.%m.%Y")
-                if end_date.date() < current_date.date():
+                if end_date.date() >= current_date.date():
                     member = ctx.guild.get_member(leave["user_id"])
-                    if member:
-                        role_id = leave_config.get("leave_role")
-                        if role_id:
-                            role = ctx.guild.get_role(role_id)
-                            if role and role in member.roles:
-                                await member.remove_roles(role)
-                                removed_count += 1
-                                leave["status"] = "ended"
-                                
-                                try:
-                                    await member.send(f"✅ Twój urlop zakończył się {leave['do']}. Twoja rola urlopowa została usunięta.")
-                                except:
-                                    pass
+                    name = member.name if member else leave["kto"]
+                    days_left = (end_date.date() - current_date.date()).days
+                    active.append(f"• **{name}** | {leave['od']} - {leave['do']} | Pozostało: {days_left} dni")
             except:
                 pass
     
-    save_leaves(leaves)
-    
-    if removed_count > 0:
-        await ctx.send(f"✅ Usunięto rolę urlopową {removed_count} użytkownikom, których urlop się zakończył.")
+    if active:
+        embed = discord.Embed(
+            title="📋 AKTYWNE URLOPY",
+            description="\n".join(active),
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=embed)
     else:
-        await ctx.send("📋 Brak zakończonych urlopów do przetworzenia.")
+        await ctx.send("📋 Brak aktywnych urlopów.")
     
     await ctx.message.delete()
+
+# Uruchom pętlę sprawdzającą w tle (dodaj to w on_ready)
+# W swojej funkcji on_ready dodaj: bot.loop.create_task(check_expired_leaves())
 
 # ========== URUCHOMIENIE ==========
 
