@@ -13,22 +13,11 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ========== PLIKI DO PRZECHOWYWANIA DANYCH ==========
-RECRUITERS_FILE = "recruiters.json"
 CONFIG_FILE = "config.json"
 TICKETS_FILE = "tickets.json"
 
-def load_recruiters():
-    try:
-        with open(RECRUITERS_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return []
-
-def save_recruiters(recruiters):
-    with open(RECRUITERS_FILE, "w") as f:
-        json.dump(recruiters, f)
-
 def load_config():
+    """Wczytuje konfigurację serwera"""
     try:
         with open(CONFIG_FILE, "r") as f:
             return json.load(f)
@@ -36,19 +25,17 @@ def load_config():
         return {
             "welcome_channel": None,
             "welcome_role": None,
-            "accepted_role": None,
-            "etap2_role1": None,
-            "etap2_role2": None,
-            "remove_role": None,
             "ticket_category": None,
             "ticket_panel_channel": None
         }
 
 def save_config(config):
+    """Zapisuje konfigurację serwera"""
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f)
 
 def load_tickets():
+    """Wczytuje listę ticketów"""
     try:
         with open(TICKETS_FILE, "r") as f:
             return json.load(f)
@@ -56,6 +43,7 @@ def load_tickets():
         return []
 
 def save_tickets(tickets):
+    """Zapisuje listę ticketów"""
     with open(TICKETS_FILE, "w") as f:
         json.dump(tickets, f)
 
@@ -66,14 +54,13 @@ async def on_ready():
     print(f"✅ Zalogowano jako {bot.user}")
     print(f"🌐 Bot działa na {len(bot.guilds)} serwerach")
     print("------")
-    
-    # Uruchom pętlę sprawdzającą urlopy
-    bot.loop.create_task(check_expired_leaves())
 
 @bot.event
 async def on_member_join(member):
+    """Wysyła powitanie gdy ktoś dołączy i nadaje rolę powitalną"""
     config = load_config()
     
+    # Nadaj rolę powitalną jeśli jest ustawiona
     if config["welcome_role"]:
         role = member.guild.get_role(config["welcome_role"])
         if role:
@@ -83,6 +70,7 @@ async def on_member_join(member):
             except:
                 print(f"Nie udało się nadać roli {member.name}")
     
+    # Wyślij wiadomość powitalną na ustawionym kanale
     if config["welcome_channel"]:
         channel = bot.get_channel(config["welcome_channel"])
         if channel:
@@ -94,6 +82,7 @@ async def on_member_join(member):
             embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
             embed.add_field(name="📅 Dołączyłeś/aś", value=f"<t:{int(member.joined_at.timestamp())}:F>", inline=True)
             embed.add_field(name="👥 Liczba użytkowników", value=f"{member.guild.member_count}", inline=True)
+            
             await channel.send(embed=embed)
 
 # ========== SYSTEM TICKETÓW ==========
@@ -103,9 +92,11 @@ active_tickets_lock = {}
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setticketcategory(ctx, category_id: int):
+    """Ustawia kategorię dla ticketów używając ID"""
     config = load_config()
     config["ticket_category"] = category_id
     save_config(config)
+    
     category = ctx.guild.get_channel(category_id)
     if category:
         await ctx.send(f"✅ Ustawiono kategorię ticketów na {category.name}")
@@ -116,34 +107,39 @@ async def setticketcategory(ctx, category_id: int):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setticketpanel(ctx, channel: discord.TextChannel):
+    """Ustawia kanał z panelem ticketów i wysyła panel"""
     config = load_config()
     config["ticket_panel_channel"] = channel.id
     save_config(config)
+    
     await send_ticket_panel(channel)
     await ctx.send(f"✅ Panel ticketów został wysłany na {channel.mention}")
     await ctx.message.delete()
 
 async def send_ticket_panel(channel):
+    """Wysyła panel ticketów na wskazany kanał"""
     embed = discord.Embed(
-        title="🎫 Podanie",
-        description="Kliknij przycisk poniżej, aby napisać podanie.",
-        color=discord.Color.green()
+        title="🎫 System Ticketów",
+        description="Kliknij przycisk poniżej, aby otworzyć ticket.",
+        color=discord.Color.blue()
     )
-    embed.add_field(name="📝 Napisz Podanie", value="Użyj wzoru z kanału wzór-podania", inline=False)
-    embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Podanie'** poniżej.", inline=False)
+    embed.add_field(name="📝 Co to jest?", value="Ticket to prywatny kanał, gdzie możesz porozmawiać z administracją.", inline=False)
+    embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Otwórz Ticket'** poniżej.", inline=False)
     embed.set_footer(text="Możesz mieć tylko jeden otwarty ticket na raz!")
     
     view = discord.ui.View(timeout=None)
-    button = discord.ui.Button(label="🎫 Podanie", style=discord.ButtonStyle.primary, custom_id="create_ticket")
+    button = discord.ui.Button(label="🎫 Otwórz Ticket", style=discord.ButtonStyle.primary, custom_id="create_ticket")
     
     async def button_callback(interaction):
         await create_ticket(interaction)
     
     button.callback = button_callback
     view.add_item(button)
+    
     await channel.send(embed=embed, view=view)
 
 async def create_ticket(interaction):
+    """Tworzy nowy ticket - sprawdza czy użytkownik nie ma już otwartego"""
     user_id = interaction.user.id
     if user_id in active_tickets_lock and active_tickets_lock[user_id]:
         await interaction.response.send_message("⏳ Twój ticket jest już w trakcie tworzenia!", ephemeral=True)
@@ -155,6 +151,7 @@ async def create_ticket(interaction):
         config = load_config()
         tickets = load_tickets()
         
+        # Sprawdź czy użytkownik ma już otwarty ticket
         for ticket in tickets:
             if ticket["user_id"] == interaction.user.id and ticket["status"] == "open":
                 channel = interaction.guild.get_channel(ticket["channel_id"])
@@ -164,32 +161,31 @@ async def create_ticket(interaction):
                     await interaction.response.send_message("❌ Masz już otwarty ticket!", ephemeral=True)
                 return
         
+        # Znajdź kategorię
         category = None
         if config["ticket_category"]:
             category = interaction.guild.get_channel(config["ticket_category"])
         
+        # Stwórz kanał ticketu
         overwrites = {
             interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         }
         
-        recruiters = load_recruiters()
-        for recruiter_id in recruiters:
-            recruiter = interaction.guild.get_member(recruiter_id)
-            if recruiter:
-                overwrites[recruiter] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-        
+        # Dodaj adminów
         for member in interaction.guild.members:
             if member.guild_permissions.administrator:
                 overwrites[member] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         
+        # Utwórz kanał
         channel = await interaction.guild.create_text_channel(
             name=f"ticket-{interaction.user.name}",
             category=category,
             overwrites=overwrites
         )
         
+        # Zapisz ticket
         ticket_data = {
             "user_id": interaction.user.id,
             "channel_id": channel.id,
@@ -199,13 +195,14 @@ async def create_ticket(interaction):
         tickets.append(ticket_data)
         save_tickets(tickets)
         
+        # Wyślij wiadomość powitalną w tickecie
         embed = discord.Embed(
             title="🎫 Ticket otwarty",
             description=f"Witaj {interaction.user.mention}!",
             color=discord.Color.green()
         )
-        embed.add_field(name="📝 Postaraj się z podaniem", value="Wkrótce ktoś sprawdzi twoje podanie.", inline=False)
-        embed.add_field(name="🔒 Zamknięcie ticketu", value="Gdy podanie zostanie rozpatrzone kliknij 'Zamknij Ticket' poniżej.", inline=False)
+        embed.add_field(name="📝 Opisz swoją sprawę", value="Napisz poniżej swoją wiadomość. Administracja odpowie tak szybko jak to możliwe.", inline=False)
+        embed.add_field(name="🔒 Zamknięcie ticketu", value="Gdy sprawa zostanie rozwiązana, kliknij przycisk 'Zamknij Ticket' poniżej.", inline=False)
         
         close_button = discord.ui.Button(label="🔒 Zamknij Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
         
@@ -213,6 +210,7 @@ async def create_ticket(interaction):
             await close_ticket(interaction_close, channel)
         
         close_button.callback = close_callback
+        
         view = discord.ui.View(timeout=None)
         view.add_item(close_button)
         
@@ -224,14 +222,22 @@ async def create_ticket(interaction):
         active_tickets_lock[user_id] = False
 
 async def close_ticket(interaction, channel):
+    """Zamyka ticket"""
     tickets = load_tickets()
+    
+    # Aktualizuj status
     for ticket in tickets:
         if ticket["channel_id"] == channel.id:
             ticket["status"] = "closed"
             break
+    
     save_tickets(tickets)
     
-    embed = discord.Embed(title="🔒 Ticket zamknięty", description="Ten ticket zostanie usunięty za 5 sekund.", color=discord.Color.red())
+    embed = discord.Embed(
+        title="🔒 Ticket zamknięty",
+        description="Ten ticket zostanie usunięty za 5 sekund.",
+        color=discord.Color.red()
+    )
     await channel.send(embed=embed)
     
     try:
@@ -244,6 +250,7 @@ async def close_ticket(interaction, channel):
 
 @bot.event
 async def on_interaction(interaction):
+    """Obsługuje przyciski ticketów"""
     if interaction.type == discord.InteractionType.component:
         if interaction.data["custom_id"] == "create_ticket":
             await create_ticket(interaction)
@@ -256,6 +263,7 @@ async def on_interaction(interaction):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setwelcomechannel(ctx, channel: discord.TextChannel):
+    """Ustawia kanał dla powitań"""
     config = load_config()
     config["welcome_channel"] = channel.id
     save_config(config)
@@ -265,6 +273,7 @@ async def setwelcomechannel(ctx, channel: discord.TextChannel):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setwelcomerole(ctx, role: discord.Role):
+    """Ustawia rolę dla nowych członków (nadawana automatycznie przy wejściu)"""
     config = load_config()
     config["welcome_role"] = role.id
     save_config(config)
@@ -273,85 +282,37 @@ async def setwelcomerole(ctx, role: discord.Role):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def setacceptedrole(ctx, role: discord.Role):
-    config = load_config()
-    config["accepted_role"] = role.id
-    save_config(config)
-    await ctx.send(f"✅ Ustawiono rolę dla zaakceptowanych na {role.mention}")
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setetap2role1(ctx, role: discord.Role):
-    config = load_config()
-    config["etap2_role1"] = role.id
-    save_config(config)
-    await ctx.send(f"✅ Ustawiono pierwszą rolę dla 2 etapu na {role.mention}")
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setetap2role2(ctx, role: discord.Role):
-    config = load_config()
-    config["etap2_role2"] = role.id
-    save_config(config)
-    await ctx.send(f"✅ Ustawiono drugą rolę dla 2 etapu na {role.mention}")
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setremoverole(ctx, role: discord.Role):
-    config = load_config()
-    config["remove_role"] = role.id
-    save_config(config)
-    await ctx.send(f"✅ Ustawiono rolę do usunięcia po 2 etapie: {role.mention}")
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
 async def showconfig(ctx):
+    """Pokazuje aktualną konfigurację serwera"""
     config = load_config()
-    embed = discord.Embed(title="⚙️ Konfiguracja serwera", color=discord.Color.blue())
     
+    embed = discord.Embed(
+        title="⚙️ Konfiguracja serwera",
+        color=discord.Color.blue()
+    )
+    
+    # Kanał powitalny
     if config["welcome_channel"]:
         channel = bot.get_channel(config["welcome_channel"])
         embed.add_field(name="📢 Kanał powitalny", value=channel.mention if channel else "Nie znaleziono", inline=False)
     else:
         embed.add_field(name="📢 Kanał powitalny", value="❌ Nie ustawiono", inline=False)
     
+    # Rola powitalna
     if config["welcome_role"]:
         role = ctx.guild.get_role(config["welcome_role"])
         embed.add_field(name="🎭 Rola dla nowych", value=role.mention if role else "Nie znaleziono", inline=False)
     else:
         embed.add_field(name="🎭 Rola dla nowych", value="❌ Nie ustawiono", inline=False)
     
-    if config["accepted_role"]:
-        role = ctx.guild.get_role(config["accepted_role"])
-        embed.add_field(name="✅ Rola po akceptacji podania", value=role.mention if role else "Nie znaleziono", inline=False)
-    else:
-        embed.add_field(name="✅ Rola po akceptacji podania", value="❌ Nie ustawiono", inline=False)
-    
-    etap2_roles = []
-    if config["etap2_role1"]:
-        role = ctx.guild.get_role(config["etap2_role1"])
-        etap2_roles.append(role.mention if role else "Nie znaleziono")
-    if config["etap2_role2"]:
-        role = ctx.guild.get_role(config["etap2_role2"])
-        etap2_roles.append(role.mention if role else "Nie znaleziono")
-    embed.add_field(name="🎖️ Role po 2 etapie", value="\n".join(etap2_roles) if etap2_roles else "❌ Nie ustawiono", inline=False)
-    
-    if config["remove_role"]:
-        role = ctx.guild.get_role(config["remove_role"])
-        embed.add_field(name="🗑️ Rola do usunięcia po 2 etapie", value=role.mention if role else "Nie znaleziono", inline=False)
-    else:
-        embed.add_field(name="🗑️ Rola do usunięcia po 2 etapie", value="❌ Nie ustawiono", inline=False)
-    
+    # Kategoria ticketów
     if config["ticket_category"]:
         category = ctx.guild.get_channel(config["ticket_category"])
         embed.add_field(name="🎫 Kategoria ticketów", value=category.name if category else "Nie znaleziono", inline=False)
     else:
         embed.add_field(name="🎫 Kategoria ticketów", value="❌ Nie ustawiono", inline=False)
     
+    # Kanał panelu ticketów
     if config["ticket_panel_channel"]:
         channel = bot.get_channel(config["ticket_panel_channel"])
         embed.add_field(name="📋 Kanał panelu ticketów", value=channel.mention if channel else "Nie znaleziono", inline=False)
@@ -361,242 +322,29 @@ async def showconfig(ctx):
     await ctx.send(embed=embed)
     await ctx.message.delete()
 
-# ========== ZARZĄDZANIE REKRUTANTAMI ==========
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def addrecruiter(ctx, member: discord.Member):
-    recruiters = load_recruiters()
-    if member.id in recruiters:
-        await ctx.send(f"❌ {member.mention} jest już rekrutantem!")
-        await ctx.message.delete()
-        return
-    recruiters.append(member.id)
-    save_recruiters(recruiters)
-    embed = discord.Embed(title="✅ DODANO REKRUTANTA", description=f"{member.mention} został dodany do zespołu rekrutacyjnego!", color=discord.Color.green())
-    await ctx.send(embed=embed)
-    await ctx.message.delete()
-    try:
-        await member.send(f"🎉 Zostałeś rekrutantem na serwerze {ctx.guild.name}!")
-    except:
-        pass
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def removerecruiter(ctx, member: discord.Member):
-    recruiters = load_recruiters()
-    if member.id not in recruiters:
-        await ctx.send(f"❌ {member.mention} nie jest rekrutantem!")
-        await ctx.message.delete()
-        return
-    recruiters.remove(member.id)
-    save_recruiters(recruiters)
-    embed = discord.Embed(title="❌ USUNIĘTO REKRUTANTA", description=f"{member.mention} został usunięty z zespołu rekrutacyjnego.", color=discord.Color.red())
-    await ctx.send(embed=embed)
-    await ctx.message.delete()
-
-@bot.command()
-async def recruiters(ctx):
-    recruiters = load_recruiters()
-    if not recruiters:
-        await ctx.send("📋 Brak rekrutantów w bazie.")
-        return
-    embed = discord.Embed(title="📋 LISTA REKRUTANTÓW", color=discord.Color.blue())
-    rekruterzy = []
-    for recruiter_id in recruiters:
-        member = ctx.guild.get_member(recruiter_id)
-        if member:
-            rekruterzy.append(f"• {member.mention} ({member.name})")
-        else:
-            rekruterzy.append(f"• Nieznany użytkownik (ID: {recruiter_id})")
-    embed.description = "\n".join(rekruterzy)
-    await ctx.send(embed=embed)
-
-# ========== SPRAWDZANIE UPRAWNIEŃ ==========
-
-def is_recruiter_or_admin(ctx):
-    if ctx.author.guild_permissions.administrator:
-        return True
-    recruiters = load_recruiters()
-    return ctx.author.id in recruiters
-
-# ========== KOMENDY REKRUTACYJNE ==========
-
-async def send_recruitment_result(ctx, member, stage, success):
-    config = load_config()
-    
-    if stage == "podanie":
-        if success:
-            title = "✅ PODANIE ZAAKCEPTOWANE"
-            color = discord.Color.green()
-            status_text = "Zaakceptowano ✅"
-            message = "Twoje podanie zostało zaakceptowane!"
-            if config["accepted_role"]:
-                role = member.guild.get_role(config["accepted_role"])
-                if role:
-                    try:
-                        await member.add_roles(role)
-                        await ctx.send(f"🎭 Nadano rolę {role.mention} użytkownikowi {member.mention}", delete_after=5)
-                    except:
-                        pass
-        else:
-            title = "❌ PODANIE ODRZUCONE"
-            color = discord.Color.red()
-            status_text = "Nie zaakceptowano ❌"
-            message = "Twoje podanie nie zostało zaakceptowane."
-    else:
-        if success:
-            title = "✅ ETAP 2 - ZALICZONY"
-            color = discord.Color.green()
-            status_text = "Przeszedł 2 etap ✅"
-            message = "Gratulacje! Przeszedłeś/łaś 2 etap rekrutacji!"
-            if config["remove_role"]:
-                role = member.guild.get_role(config["remove_role"])
-                if role and role in member.roles:
-                    try:
-                        await member.remove_roles(role)
-                        await ctx.send(f"🗑️ Usunięto rolę {role.mention} użytkownikowi {member.mention}", delete_after=5)
-                    except:
-                        pass
-            roles_added = []
-            if config["etap2_role1"]:
-                role = member.guild.get_role(config["etap2_role1"])
-                if role:
-                    try:
-                        await member.add_roles(role)
-                        roles_added.append(role.mention)
-                    except:
-                        pass
-            if config["etap2_role2"]:
-                role = member.guild.get_role(config["etap2_role2"])
-                if role:
-                    try:
-                        await member.add_roles(role)
-                        roles_added.append(role.mention)
-                    except:
-                        pass
-            if roles_added:
-                await ctx.send(f"🎭 Nadano role: {', '.join(roles_added)} użytkownikowi {member.mention}", delete_after=5)
-        else:
-            title = "❌ ETAP 2 - NIEZALICZONY"
-            color = discord.Color.red()
-            status_text = "Nie przeszedł 2 etapu ❌"
-            message = "Niestety nie przeszedłeś/łaś 2 etapu rekrutacji."
-    
-    embed = discord.Embed(title=title, description=f"Wynik rekrutacji dla {member.mention}", color=color)
-    embed.add_field(name="Status", value=f"**{status_text}**", inline=False)
-    embed.add_field(name="Wiadomość", value=message, inline=False)
-    embed.add_field(name="Rekrutujący", value=ctx.author.mention, inline=False)
-    await ctx.send(embed=embed)
-    
-    try:
-        await member.send(embed=embed)
-    except:
-        pass
-    try:
-        await ctx.author.send(f"✅ Wynik dla {member.name} został wysłany: {status_text}")
-    except:
-        pass
-
-@bot.command()
-@commands.check(is_recruiter_or_admin)
-async def podanie(ctx, status: str, member: discord.Member):
-    await ctx.message.delete()
-    if status.lower() == "fail":
-        await send_recruitment_result(ctx, member, "podanie", False)
-    elif status.lower() == "true":
-        await send_recruitment_result(ctx, member, "podanie", True)
-    else:
-        await ctx.send("❌ Użyj `!podanie fail @użytkownik` lub `!podanie true @użytkownik`", delete_after=5)
-
-@bot.command()
-@commands.check(is_recruiter_or_admin)
-async def etap2(ctx, status: str, member: discord.Member):
-    await ctx.message.delete()
-    if status.lower() == "fail":
-        await send_recruitment_result(ctx, member, "etap2", False)
-    elif status.lower() == "true":
-        await send_recruitment_result(ctx, member, "etap2", True)
-    else:
-        await ctx.send("❌ Użyj `!etap2 fail @użytkownik` lub `!etap2 true @użytkownik`", delete_after=5)
-
-# ========== KOMENDA REKRUTACJA OPEN ==========
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def rekrutacja_open(ctx):
-    """Wysyła ogłoszenie o otwarciu rekrutacji z pingiem roli o ID 1486772105965207725"""
-    
-    ROLE_ID = 1486772105965207725
-    role = ctx.guild.get_role(ROLE_ID)
-    
-    if not role:
-        await ctx.send("❌ Nie znaleziono roli o ID 1486772105965207725!")
-        await ctx.message.delete()
-        return
-    
-    embed = discord.Embed(
-        title="🔴 REKRUTACJA OTWARTA!",
-        description="Rekrutacja została właśnie otwarta!",
-        color=discord.Color.red()
-    )
-    embed.add_field(
-        name="📝 Jak wziąć udział?",
-        value="Wejdź na kanał **poczekalnia** i kliknij przycisk **'Podanie'**.",
-        inline=False
-    )
-    embed.add_field(
-        name="⏰ Czas trwania",
-        value="Rekrutacja będzie otwarta przez ograniczony czas. Nie zwlekaj!",
-        inline=False
-    )
-    embed.set_footer(text="Powodzenia!")
-    
-    await ctx.send(f"{role.mention} 🔴 **REKRUTACJA OTWARTA!** 🔴")
-    await ctx.send(embed=embed)
-    await ctx.message.delete()
-    print("✅ Komenda rekrutacja_open wykonana!")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def rekrutacja_closed(ctx):
-    """Wysyła ogłoszenie o zamknięciu rekrutacji"""
-    
-    embed = discord.Embed(
-        title="⚫ REKRUTACJA ZAMKNIĘTA",
-        description="Rekrutacja została właśnie zamknięta.",
-        color=discord.Color.dark_gray()
-    )
-    embed.add_field(
-        name="📝 Co dalej?",
-        value="Dziękujemy wszystkim za udział! Osoby które złożyły podanie otrzymają odpowiedź wkrótce.",
-        inline=False
-    )
-    embed.set_footer(text=f"Ogłoszenie wysłane przez {ctx.author.name}")
-    
-    await ctx.send(embed=embed)
-    await ctx.message.delete()
-    print("✅ Komenda rekrutacja_closed wykonana!")
-
 # ========== KOMENDA POMOCY ==========
 
 @bot.command()
 async def helpme(ctx):
-    is_recruiter = is_recruiter_or_admin(ctx)
+    """Pokazuje dostępne komendy"""
+    embed = discord.Embed(
+        title="🤖 Pomoc - dostępne komendy",
+        description="Lista komend które możesz używać:",
+        color=discord.Color.blue()
+    )
     
-    embed = discord.Embed(title="🤖 Pomoc - Dostępne komendy", color=discord.Color.blue())
-    
-    embed.add_field(name="📌 Podstawowe:", value="`!ping` - sprawdza bota\n`!hello` - przywitanie\n`!helpme` - pokazuje tę pomoc", inline=False)
-    
-    if is_recruiter:
-        embed.add_field(name="📝 Rekrutacja (rekrutanci/admin):", value="`!podanie true/fail @użytkownik` - ocena podania\n`!etap2 true/fail @użytkownik` - ocena 2 etapu", inline=False)
+    embed.add_field(name="📌 Podstawowe:", 
+                    value="`!ping` - sprawdza czy bot działa\n`!hello` - bot się przywita\n`!helpme` - pokazuje tę pomoc", 
+                    inline=False)
     
     if ctx.author.guild_permissions.administrator:
-        embed.add_field(name="⚙️ Konfiguracja serwera (admin):", 
-                        value="`!setwelcomechannel #kanał` - kanał powitalny\n`!setwelcomerole @rola` - rola dla nowych\n`!setacceptedrole @rola` - rola po akceptacji\n`!setetap2role1 @rola` - pierwsza rola po 2 etapie\n`!setetap2role2 @rola` - druga rola po 2 etapie\n`!setremoverole @rola` - rola do usunięcia\n`!setticketcategory ID` - kategoria ticketów\n`!setticketpanel #kanał` - panel ticketów\n`!showconfig` - pokazuje konfigurację", inline=False)
-        embed.add_field(name="👑 Zarządzanie rekrutantami (admin):", value="`!addrecruiter @user` - dodaje rekrutanta\n`!removerecruiter @user` - usuwa rekrutanta\n`!recruiters` - lista rekrutantów", inline=False)
-        embed.add_field(name="🔴 Komendy rekrutacji (admin):", value="`!rekrutacja-open` - otwiera rekrutację\n`!rekrutacja-closed` - zamyka rekrutację", inline=False)
-        embed.add_field(name="🔧 Inne admin:", value="`!say [wiadomość]` - bot wysyła wiadomość", inline=False)
+        embed.add_field(name="⚙️ Konfiguracja (admin):", 
+                        value="`!setwelcomechannel #kanał` - ustawia kanał powitalny\n"
+                              "`!setwelcomerole @rola` - ustawia rolę dla nowych członków\n"
+                              "`!setticketcategory ID` - ustawia kategorię dla ticketów\n"
+                              "`!setticketpanel #kanał` - ustawia kanał panelu ticketów\n"
+                              "`!showconfig` - pokazuje konfigurację", 
+                        inline=False)
     
     await ctx.send(embed=embed)
 
@@ -604,674 +352,27 @@ async def helpme(ctx):
 
 @bot.command()
 async def ping(ctx):
-    await ctx.send(f"Pong! 🏓 {round(bot.latency * 1000)}ms")
+    """Sprawdza opóźnienie bota"""
+    await ctx.send(f"Pong! 🏓 Opóźnienie: {round(bot.latency * 1000)}ms")
 
 @bot.command()
 async def hello(ctx):
+    """Bot się przywita"""
     await ctx.send(f"Cześć {ctx.author.mention}! 👋")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def say(ctx, *, wiadomosc):
+    """Bot wysyła wiadomość którą mu przekażesz (tylko admin)"""
     await ctx.message.delete()
     await ctx.send(wiadomosc)
-
-# ========== SYSTEM URLOPÓW I NIEOBECNOŚCI REGRUP ==========
-
-import asyncio
-from datetime import datetime, timedelta
-
-# Plik do przechowywania wniosków
-LEAVE_FILE = "leaves.json"
-
-def load_leaves():
-    try:
-        with open(LEAVE_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return []
-
-def save_leaves(leaves):
-    with open(LEAVE_FILE, "w") as f:
-        json.dump(leaves, f)
-
-# Zmienne konfiguracyjne
-leave_config = {
-    "leave_channel": None,
-    "regroup_channel": None,
-    "leave_panel_channel": None,
-    "regroup_panel_channel": None,
-    "leave_role": None,
-    "regroup_role": None
-}
-
-# Zbiór do przechowywania ID już przetworzonych przycisków (zabezpieczenie przed wielokrotną akceptacją)
-processed_buttons = set()
-
-# ========== KOMENDY KONFIGURACYJNE ==========
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setleavechannel(ctx, channel: discord.TextChannel):
-    """Ustawia kanał gdzie będą wysyłane wnioski urlopowe do akceptacji"""
-    leave_config["leave_channel"] = channel.id
-    await ctx.send(f"✅ Ustawiono kanał wniosków urlopowych na {channel.mention}")
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setregroupchannel(ctx, channel: discord.TextChannel):
-    """Ustawia kanał gdzie będą wysyłane wnioski regrup do akceptacji"""
-    leave_config["regroup_channel"] = channel.id
-    await ctx.send(f"✅ Ustawiono kanał wniosków regrup na {channel.mention}")
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setleavepanel(ctx, channel: discord.TextChannel):
-    """Ustawia kanał z panelem urlopów"""
-    leave_config["leave_panel_channel"] = channel.id
-    await send_leave_panel(channel)
-    await ctx.send(f"✅ Panel urlopów został wysłany na {channel.mention}")
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setregrouppanel(ctx, channel: discord.TextChannel):
-    """Ustawia kanał z panelem nieobecności regrup"""
-    leave_config["regroup_panel_channel"] = channel.id
-    await send_regroup_panel(channel)
-    await ctx.send(f"✅ Panel nieobecności regrup został wysłany na {channel.mention}")
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setleaverole(ctx, role: discord.Role):
-    """Ustawia rolę nadawaną po zaakceptowaniu urlopu"""
-    leave_config["leave_role"] = role.id
-    await ctx.send(f"✅ Ustawiono rolę urlopową na {role.mention}")
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setregrouprole(ctx, role: discord.Role):
-    """Ustawia rolę nadawaną po zaakceptowaniu nieobecności regrup"""
-    leave_config["regroup_role"] = role.id
-    await ctx.send(f"✅ Ustawiono rolę regrup na {role.mention}")
-    await ctx.message.delete()
-
-# ========== WYSYŁANIE PANELI ==========
-
-async def send_leave_panel(channel):
-    """Wysyła panel urlopów"""
-    embed = discord.Embed(
-        title="📝 WNIOSEK URLOPOWY",
-        description="Kliknij przycisk poniżej, aby złożyć wniosek urlopowy.",
-        color=discord.Color.blue()
-    )
-    embed.add_field(name="📋 Informacja", value="Wypełnij formularz, a Twoja prośba zostanie rozpatrzona.", inline=False)
-    
-    view = discord.ui.View(timeout=None)
-    button = discord.ui.Button(label="📝 Złóż wniosek urlopowy", style=discord.ButtonStyle.primary, custom_id="leave_request")
-    
-    async def button_callback(interaction):
-        await start_leave_request(interaction)
-    
-    button.callback = button_callback
-    view.add_item(button)
-    await channel.send(embed=embed, view=view)
-
-async def send_regroup_panel(channel):
-    """Wysyła panel nieobecności regrup"""
-    embed = discord.Embed(
-        title="⚠️ NIEOBECNOŚĆ REGRUP",
-        description="Kliknij przycisk poniżej, aby zgłosić nieobecność na regrupie.",
-        color=discord.Color.orange()
-    )
-    embed.add_field(name="📋 Informacja", value="Wypełnij formularz, aby zgłosić nieobecność.", inline=False)
-    
-    view = discord.ui.View(timeout=None)
-    button = discord.ui.Button(label="⚠️ Zgłoś nieobecność", style=discord.ButtonStyle.danger, custom_id="regroup_request")
-    
-    async def button_callback(interaction):
-        await start_regroup_request(interaction)
-    
-    button.callback = button_callback
-    view.add_item(button)
-    await channel.send(embed=embed, view=view)
-
-# ========== FORMULARZE ==========
-
-async def start_leave_request(interaction):
-    """Rozpoczyna proces składania wniosku urlopowego"""
-    modal = discord.ui.Modal(title="📝 Wniosek urlopowy")
-    
-    modal.add_item(discord.ui.TextInput(
-        label="Kto składa wniosek?",
-        placeholder="Twoja nazwa lub nick",
-        required=True,
-        max_length=100
-    ))
-    
-    modal.add_item(discord.ui.TextInput(
-        label="Od kiedy? (data)",
-        placeholder="DD.MM.YYYY",
-        required=True,
-        max_length=20
-    ))
-    
-    modal.add_item(discord.ui.TextInput(
-        label="Do kiedy? (data)",
-        placeholder="DD.MM.YYYY",
-        required=True,
-        max_length=20
-    ))
-    
-    modal.add_item(discord.ui.TextInput(
-        label="Powód urlopu",
-        placeholder="Napisz powód...",
-        required=True,
-        style=discord.TextStyle.paragraph,
-        max_length=500
-    ))
-    
-    async def modal_callback(interaction_modal):
-        await submit_leave_request(interaction_modal, modal.children)
-    
-    modal.on_submit = modal_callback
-    await interaction.response.send_modal(modal)
-
-async def start_regroup_request(interaction):
-    """Rozpoczyna proces zgłaszania nieobecności regrup"""
-    modal = discord.ui.Modal(title="⚠️ Nieobecność regrup")
-    
-    modal.add_item(discord.ui.TextInput(
-        label="Kto zgłasza nieobecność?",
-        placeholder="Twoja nazwa lub nick",
-        required=True,
-        max_length=100
-    ))
-    
-    modal.add_item(discord.ui.TextInput(
-        label="Z jakiego dnia?",
-        placeholder="DD.MM.YYYY",
-        required=True,
-        max_length=20
-    ))
-    
-    modal.add_item(discord.ui.TextInput(
-        label="Powód nieobecności",
-        placeholder="Napisz powód...",
-        required=True,
-        style=discord.TextStyle.paragraph,
-        max_length=500
-    ))
-    
-    async def modal_callback(interaction_modal):
-        await submit_regroup_request(interaction_modal, modal.children)
-    
-    modal.on_submit = modal_callback
-    await interaction.response.send_modal(modal)
-
-# ========== WYSYŁANIE WNIOSKÓW ==========
-
-async def submit_leave_request(interaction, fields):
-    """Wysyła wniosek urlopowy do akceptacji"""
-    kto = fields[0].value
-    od = fields[1].value
-    do = fields[2].value
-    powod = fields[3].value
-    
-    leaves = load_leaves()
-    request_id = len(leaves) + 1
-    
-    request_data = {
-        "id": request_id,
-        "type": "leave",
-        "user_id": interaction.user.id,
-        "user_name": interaction.user.name,
-        "kto": kto,
-        "od": od,
-        "do": do,
-        "powod": powod,
-        "status": "pending",
-        "created_at": datetime.now().isoformat(),
-        "processed": False
-    }
-    leaves.append(request_data)
-    save_leaves(leaves)
-    
-    # Wyślij do akceptacji
-    channel_id = leave_config.get("leave_channel")
-    if channel_id:
-        channel = interaction.guild.get_channel(channel_id)
-        if channel:
-            embed = discord.Embed(
-                title="📝 NOWY WNIOSEK URLOPOWY",
-                description=f"**ID:** {request_id}",
-                color=discord.Color.blue()
-            )
-            embed.add_field(name="👤 Kto", value=kto, inline=True)
-            embed.add_field(name="📅 Od", value=od, inline=True)
-            embed.add_field(name="📅 Do", value=do, inline=True)
-            embed.add_field(name="📋 Powód", value=powod, inline=False)
-            embed.add_field(name="👤 Zgłaszający", value=interaction.user.mention, inline=False)
-            embed.set_footer(text="Użyj przycisków poniżej do zaakceptowania lub odrzucenia")
-            
-            view = discord.ui.View(timeout=None)
-            
-            accept_button = discord.ui.Button(label="✅ Akceptuj", style=discord.ButtonStyle.success, custom_id=f"accept_leave_{request_id}")
-            reject_button = discord.ui.Button(label="❌ Odrzuć", style=discord.ButtonStyle.danger, custom_id=f"reject_leave_{request_id}")
-            
-            async def accept_callback(interaction_accept):
-                await accept_leave_request(interaction_accept, request_id)
-            
-            async def reject_callback(interaction_reject):
-                await reject_leave_request(interaction_reject, request_id)
-            
-            accept_button.callback = accept_callback
-            reject_button.callback = reject_callback
-            
-            view.add_item(accept_button)
-            view.add_item(reject_button)
-            
-            await channel.send(embed=embed, view=view)
-    
-    await interaction.response.send_message("✅ Twój wniosek urlopowy został wysłany do rozpatrzenia!", ephemeral=True)
-
-async def submit_regroup_request(interaction, fields):
-    """Wysyła wniosek nieobecności regrup do akceptacji"""
-    kto = fields[0].value
-    dzien = fields[1].value
-    powod = fields[2].value
-    
-    leaves = load_leaves()
-    request_id = len(leaves) + 1
-    
-    request_data = {
-        "id": request_id,
-        "type": "regroup",
-        "user_id": interaction.user.id,
-        "user_name": interaction.user.name,
-        "kto": kto,
-        "dzien": dzien,
-        "powod": powod,
-        "status": "pending",
-        "created_at": datetime.now().isoformat(),
-        "processed": False
-    }
-    leaves.append(request_data)
-    save_leaves(leaves)
-    
-    # Wyślij do akceptacji
-    channel_id = leave_config.get("regroup_channel")
-    if channel_id:
-        channel = interaction.guild.get_channel(channel_id)
-        if channel:
-            embed = discord.Embed(
-                title="⚠️ NOWA NIEOBECNOŚĆ REGRUP",
-                description=f"**ID:** {request_id}",
-                color=discord.Color.orange()
-            )
-            embed.add_field(name="👤 Kto", value=kto, inline=True)
-            embed.add_field(name="📅 Dzień", value=dzien, inline=True)
-            embed.add_field(name="📋 Powód", value=powod, inline=False)
-            embed.add_field(name="👤 Zgłaszający", value=interaction.user.mention, inline=False)
-            embed.set_footer(text="Użyj przycisków poniżej do zaakceptowania lub odrzucenia")
-            
-            view = discord.ui.View(timeout=None)
-            
-            accept_button = discord.ui.Button(label="✅ Akceptuj", style=discord.ButtonStyle.success, custom_id=f"accept_regroup_{request_id}")
-            reject_button = discord.ui.Button(label="❌ Odrzuć", style=discord.ButtonStyle.danger, custom_id=f"reject_regroup_{request_id}")
-            
-            async def accept_callback(interaction_accept):
-                await accept_regroup_request(interaction_accept, request_id)
-            
-            async def reject_callback(interaction_reject):
-                await reject_regroup_request(interaction_reject, request_id)
-            
-            accept_button.callback = accept_callback
-            reject_button.callback = reject_callback
-            
-            view.add_item(accept_button)
-            view.add_item(reject_button)
-            
-            await channel.send(embed=embed, view=view)
-    
-    await interaction.response.send_message("✅ Twoja nieobecność została zgłoszona do rozpatrzenia!", ephemeral=True)
-
-# ========== AKCEPTACJA I ODRZUCENIE (z zabezpieczeniem przed wielokrotną akceptacją) ==========
-
-async def accept_leave_request(interaction, request_id):
-    """Akceptuje wniosek urlopowy - tylko raz"""
-    
-    # Zabezpieczenie przed wielokrotnym kliknięciem
-    button_id = f"accept_leave_{request_id}_{interaction.user.id}"
-    if button_id in processed_buttons:
-        await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
-        return
-    
-    processed_buttons.add(button_id)
-    
-    leaves = load_leaves()
-    user_id = None
-    end_date_str = None
-    found = False
-    
-    for leave in leaves:
-        if leave["id"] == request_id and leave["type"] == "leave":
-            if leave["status"] != "pending":
-                await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
-                return
-            leave["status"] = "accepted"
-            user_id = leave["user_id"]
-            end_date_str = leave["do"]
-            found = True
-            break
-    
-    if not found:
-        await interaction.response.send_message("❌ Nie znaleziono wniosku!", ephemeral=True)
-        return
-    
-    save_leaves(leaves)
-    
-    # Nadaj rolę
-    role_id = leave_config.get("leave_role")
-    if role_id and user_id:
-        role = interaction.guild.get_role(role_id)
-        if role:
-            member = interaction.guild.get_member(user_id)
-            if member:
-                try:
-                    await member.add_roles(role)
-                    
-                    embed = discord.Embed(
-                        title="✅ WNIOSEK ZAAKCEPTOWANY",
-                        description=f"Wniosek urlopowy ID: {request_id} został zaakceptowany!",
-                        color=discord.Color.green()
-                    )
-                    embed.add_field(name="👤 Użytkownik", value=member.mention, inline=True)
-                    embed.add_field(name="📅 Okres", value=f"{leave['od']} - {leave['do']}", inline=True)
-                    embed.add_field(name="👑 Nadana rola", value=role.mention, inline=False)
-                    
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
-                    
-                    # Wyślij PW
-                    try:
-                        await member.send(f"✅ Twój wniosek urlopowy ID: {request_id} został zaakceptowany!\n📅 Okres: {leave['od']} - {leave['do']}\n👤 Otrzymałeś rolę: {role.name}")
-                    except:
-                        pass
-                        
-                except Exception as e:
-                    await interaction.response.send_message(f"❌ Błąd przy nadawaniu roli: {e}", ephemeral=True)
-            else:
-                await interaction.response.send_message("❌ Nie znaleziono użytkownika!", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Nie znaleziono roli!", ephemeral=True)
-    else:
-        await interaction.response.send_message("✅ Wniosek zaakceptowany (rola nie została ustawiona)", ephemeral=True)
-
-async def reject_leave_request(interaction, request_id):
-    """Odrzuca wniosek urlopowy - tylko raz"""
-    
-    # Zabezpieczenie przed wielokrotnym kliknięciem
-    button_id = f"reject_leave_{request_id}_{interaction.user.id}"
-    if button_id in processed_buttons:
-        await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
-        return
-    
-    processed_buttons.add(button_id)
-    
-    leaves = load_leaves()
-    user_id = None
-    
-    for leave in leaves:
-        if leave["id"] == request_id and leave["type"] == "leave":
-            if leave["status"] != "pending":
-                await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
-                return
-            leave["status"] = "rejected"
-            user_id = leave["user_id"]
-            break
-    
-    save_leaves(leaves)
-    
-    embed = discord.Embed(
-        title="❌ WNIOSEK ODRZUCONY",
-        description=f"Wniosek urlopowy ID: {request_id} został odrzucony!",
-        color=discord.Color.red()
-    )
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    # Wyślij PW
-    if user_id:
-        user = interaction.guild.get_member(user_id)
-        if user:
-            try:
-                await user.send(f"❌ Twój wniosek urlopowy ID: {request_id} został odrzucony!")
-            except:
-                pass
-
-async def accept_regroup_request(interaction, request_id):
-    """Akceptuje wniosek nieobecności regrup - tylko raz"""
-    
-    # Zabezpieczenie przed wielokrotnym kliknięciem
-    button_id = f"accept_regroup_{request_id}_{interaction.user.id}"
-    if button_id in processed_buttons:
-        await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
-        return
-    
-    processed_buttons.add(button_id)
-    
-    leaves = load_leaves()
-    user_id = None
-    
-    for leave in leaves:
-        if leave["id"] == request_id and leave["type"] == "regroup":
-            if leave["status"] != "pending":
-                await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
-                return
-            leave["status"] = "accepted"
-            user_id = leave["user_id"]
-            break
-    
-    save_leaves(leaves)
-    
-    # Nadaj rolę
-    role_id = leave_config.get("regroup_role")
-    if role_id and user_id:
-        role = interaction.guild.get_role(role_id)
-        if role:
-            member = interaction.guild.get_member(user_id)
-            if member:
-                try:
-                    await member.add_roles(role)
-                    
-                    embed = discord.Embed(
-                        title="✅ NIEOBECNOŚĆ ZAAKCEPTOWANA",
-                        description=f"Nieobecność regrup ID: {request_id} została zaakceptowana!",
-                        color=discord.Color.green()
-                    )
-                    embed.add_field(name="👤 Użytkownik", value=member.mention, inline=True)
-                    embed.add_field(name="📅 Dzień", value=leave["dzien"], inline=True)
-                    embed.add_field(name="👑 Nadana rola", value=role.mention, inline=False)
-                    
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
-                    
-                    try:
-                        await member.send(f"✅ Twoja nieobecność regrup ID: {request_id} została zaakceptowana!\n📅 Dzień: {leave['dzien']}\n👤 Otrzymałeś rolę: {role.name}")
-                    except:
-                        pass
-                        
-                except Exception as e:
-                    await interaction.response.send_message(f"❌ Błąd przy nadawaniu roli: {e}", ephemeral=True)
-            else:
-                await interaction.response.send_message("❌ Nie znaleziono użytkownika!", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Nie znaleziono roli!", ephemeral=True)
-    else:
-        await interaction.response.send_message("✅ Nieobecność zaakceptowana (rola nie została ustawiona)", ephemeral=True)
-
-async def reject_regroup_request(interaction, request_id):
-    """Odrzuca wniosek nieobecności regrup - tylko raz"""
-    
-    # Zabezpieczenie przed wielokrotnym kliknięciem
-    button_id = f"reject_regroup_{request_id}_{interaction.user.id}"
-    if button_id in processed_buttons:
-        await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
-        return
-    
-    processed_buttons.add(button_id)
-    
-    leaves = load_leaves()
-    user_id = None
-    
-    for leave in leaves:
-        if leave["id"] == request_id and leave["type"] == "regroup":
-            if leave["status"] != "pending":
-                await interaction.response.send_message("⚠️ Ten wniosek został już rozpatrzony!", ephemeral=True)
-                return
-            leave["status"] = "rejected"
-            user_id = leave["user_id"]
-            break
-    
-    save_leaves(leaves)
-    
-    embed = discord.Embed(
-        title="❌ NIEOBECNOŚĆ ODRZUCONA",
-        description=f"Nieobecność regrup ID: {request_id} została odrzucona!",
-        color=discord.Color.red()
-    )
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    if user_id:
-        user = interaction.guild.get_member(user_id)
-        if user:
-            try:
-                await user.send(f"❌ Twoja nieobecność regrup ID: {request_id} została odrzucona!")
-            except:
-                pass
-
-# ========== AUTOMATYCZNE USUWANIE ROLI PO URLOPIE ==========
-
-async def check_expired_leaves():
-    """Sprawdza czy jakieś urlopy się skończyły i usuwa role"""
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            leaves = load_leaves()
-            current_date = datetime.now()
-            
-            for leave in leaves:
-                if leave["type"] == "leave" and leave["status"] == "accepted":
-                    try:
-                        end_date = datetime.strptime(leave["do"], "%d.%m.%Y")
-                        if end_date.date() < current_date.date():
-                            for guild in bot.guilds:
-                                member = guild.get_member(leave["user_id"])
-                                if member:
-                                    role_id = leave_config.get("leave_role")
-                                    if role_id:
-                                        role = guild.get_role(role_id)
-                                        if role and role in member.roles:
-                                            await member.remove_roles(role)
-                                            print(f"Usunięto rolę urlopową użytkownikowi {member.name}")
-                                            try:
-                                                await member.send(f"✅ Twój urlop zakończył się {leave['do']}. Twoja rola urlopowa została usunięta.")
-                                            except:
-                                                pass
-                                            leave["status"] = "ended"
-                                            save_leaves(leaves)
-                    except:
-                        pass
-            
-            await asyncio.sleep(3600)
-            
-        except Exception as e:
-            print(f"Błąd w check_expired_leaves: {e}")
-            await asyncio.sleep(3600)
-
-# ========== KOMENDY DO SPRAWDZANIA URLOPÓW ==========
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def checkleaves(ctx):
-    """Ręcznie sprawdza i usuwa role po zakończonych urlopach"""
-    leaves = load_leaves()
-    current_date = datetime.now()
-    removed_count = 0
-    
-    for leave in leaves:
-        if leave["type"] == "leave" and leave["status"] == "accepted":
-            try:
-                end_date = datetime.strptime(leave["do"], "%d.%m.%Y")
-                if end_date.date() < current_date.date():
-                    member = ctx.guild.get_member(leave["user_id"])
-                    if member:
-                        role_id = leave_config.get("leave_role")
-                        if role_id:
-                            role = ctx.guild.get_role(role_id)
-                            if role and role in member.roles:
-                                await member.remove_roles(role)
-                                removed_count += 1
-                                leave["status"] = "ended"
-                                try:
-                                    await member.send(f"✅ Twój urlop zakończył się {leave['do']}. Twoja rola urlopowa została usunięta.")
-                                except:
-                                    pass
-            except:
-                pass
-    
-    save_leaves(leaves)
-    
-    if removed_count > 0:
-        await ctx.send(f"✅ Usunięto rolę urlopową {removed_count} użytkownikom.")
-    else:
-        await ctx.send("📋 Brak zakończonych urlopów.")
-    
-    await ctx.message.delete()
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def activeleaves(ctx):
-    """Pokazuje aktywne urlopy"""
-    leaves = load_leaves()
-    current_date = datetime.now()
-    active = []
-    
-    for leave in leaves:
-        if leave["type"] == "leave" and leave["status"] == "accepted":
-            try:
-                end_date = datetime.strptime(leave["do"], "%d.%m.%Y")
-                if end_date.date() >= current_date.date():
-                    member = ctx.guild.get_member(leave["user_id"])
-                    name = member.name if member else leave["kto"]
-                    days_left = (end_date.date() - current_date.date()).days
-                    active.append(f"• **{name}** | {leave['od']} - {leave['do']} | Pozostało: {days_left} dni")
-            except:
-                pass
-    
-    if active:
-        embed = discord.Embed(
-            title="📋 AKTYWNE URLOPY",
-            description="\n".join(active),
-            color=discord.Color.blue()
-        )
-        await ctx.send(embed=embed)
-    else:
-        await ctx.send("📋 Brak aktywnych urlopów.")
-    
-    await ctx.message.delete()
-
-# Uruchom pętlę sprawdzającą w tle (dodaj to w on_ready)
-# W swojej funkcji on_ready dodaj: bot.loop.create_task(check_expired_leaves())
 
 # ========== URUCHOMIENIE ==========
 
 if __name__ == "__main__":
     try:
         bot.run(TOKEN)
+    except discord.LoginFailure:
+        print("❌ BŁĄD: Nieprawidłowy token!")
     except Exception as e:
         print(f"❌ BŁĄD: {e}")
