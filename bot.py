@@ -27,7 +27,8 @@ def load_config():
             "welcome_role": None,
             "ticket_category": None,
             "ticket_panel_channel": None,
-            "ticket_footer_image": None
+            "ticket_footer_image": None,
+            "ticket_logo_url": None
         }
 
 def save_config(config):
@@ -94,8 +95,7 @@ active_tickets_lock = {}
 @commands.has_permissions(administrator=True)
 async def setticketfooter(ctx, url: str = None):
     """Ustawia obrazek na dole ticketu (URL)
-    Użycie: !setticketfooter https://example.com/obrazek.png
-    Aby usunąć: !setticketfooter"""
+    Użycie: !setticketfooter https://example.com/obrazek.png"""
     config = load_config()
     config["ticket_footer_image"] = url
     save_config(config)
@@ -104,6 +104,21 @@ async def setticketfooter(ctx, url: str = None):
         await ctx.send(f"✅ Ustawiono obrazek ticketu")
     else:
         await ctx.send(f"✅ Usunięto obrazek ticketu")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setticketlogo(ctx, url: str = None):
+    """Ustawia logo w lewym górnym rogu ticketu (URL)
+    Użycie: !setticketlogo https://example.com/logo.png"""
+    config = load_config()
+    config["ticket_logo_url"] = url
+    save_config(config)
+    
+    if url:
+        await ctx.send(f"✅ Ustawiono logo ticketu")
+    else:
+        await ctx.send(f"✅ Usunięto logo ticketu")
     await ctx.message.delete()
 
 @bot.command()
@@ -136,9 +151,9 @@ async def setticketpanel(ctx, channel: discord.TextChannel):
 async def send_ticket_panel(channel):
     """Wysyła panel ticketów na wskazany kanał"""
     embed = discord.Embed(
-        title="🎫 Vireona Hub × TICKET",
+        title="🎫 **Vireona Hub** × **TICKET**",
         description="Kliknij przycisk poniżej, aby otworzyć ticket.",
-        color=discord.Color.blue()
+        color=0x2b2d31
     )
     embed.add_field(name="📝 Co to jest?", value="Ticket to prywatny kanał, gdzie możesz porozmawiać z administracją.", inline=False)
     embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Otwórz Ticket'** poniżej.", inline=False)
@@ -214,23 +229,37 @@ async def create_ticket(interaction):
         
         # ========== PIĘKNY EMBED TICKETU ==========
         
-        # Utwórz embed z niebieską linią po lewej (kolor 0x5865f2)
+        # Przygotuj zamazane ID (spoiler)
+        user_id_str = str(interaction.user.id)
+        masked_id = f"||{user_id_str[:3]}XXXXXX{user_id_str[-3:]}||"
+        
+        # Przygotuj logo
+        logo_url = config.get("ticket_logo_url")
+        
+        # Tytuł z czarnym tłem
+        title_text = "╔════════════════════════════════════════╗\n║          🎫 Vireona Hub × TICKET          ║\n╚════════════════════════════════════════╝"
+        
+        # Utwórz embed z niebieską linią po lewej
         embed = discord.Embed(
-            title="🎫 Vireona Hub × TICKET",
-            color=0x5865f2  # Niebieski kolor Discord
+            description=f"```\n{title_text}\n```",
+            color=0x5865f2
         )
+        
+        # Dodaj logo w miniaturce (lewy górny róg)
+        if logo_url:
+            embed.set_thumbnail(url=logo_url)
         
         # Sekcja 1: Informacje o kliencie
         embed.add_field(
-            name="🎫 Informacje o kliencie:",
-            value=f"🔔 Ping: {interaction.user.mention}\n🔔 Nick: {interaction.user.name}\n🔔 ID: `{interaction.user.id}`",
+            name="**🎫 INFORMACJE O KLIENCIE:**",
+            value=f"> **🔔 Ping:** {interaction.user.mention}\n> **🔔 Nick:** **{interaction.user.name}**\n> **🔔 ID:** {masked_id}",
             inline=False
         )
         
         # Sekcja 2: Informacje o pomocy
         embed.add_field(
-            name="🎫 Informacje o pomocy:",
-            value="📌 Wybrane podanie: Administracja\n\n📝 Opisz swoją sprawę poniżej. Administracja odpowie tak szybko jak to możliwe.",
+            name="**🎫 INFORMACJE O POMOCY:**",
+            value="> **📌 Wybrane podanie:** `Administracja`\n> \n> **📝 Opisz swoją sprawę poniżej.**\n> Administracja odpowie tak szybko jak to możliwe.",
             inline=False
         )
         
@@ -256,6 +285,8 @@ async def create_ticket(interaction):
         view = discord.ui.View(timeout=None)
         view.add_item(close_button)
         
+        # Wyślij ping dla graczy z komendą /spoiler
+        await channel.send(f"||@everyone|| 🎫 **Nowy ticket od {interaction.user.mention}**")
         await channel.send(embed=embed, view=view)
         await interaction.response.send_message(f"✅ Ticket został utworzony! {channel.mention}", ephemeral=True)
         
@@ -367,6 +398,12 @@ async def showconfig(ctx):
     else:
         embed.add_field(name="🖼️ Obrazek ticketu", value="❌ Nie ustawiono", inline=False)
     
+    # Logo ticketu
+    if config["ticket_logo_url"]:
+        embed.add_field(name="🖼️ Logo ticketu", value="Ustawione", inline=False)
+    else:
+        embed.add_field(name="🖼️ Logo ticketu", value="❌ Nie ustawiono", inline=False)
+    
     await ctx.send(embed=embed)
     await ctx.message.delete()
 
@@ -392,6 +429,7 @@ async def helpme(ctx):
                               "`!setticketcategory ID` - ustawia kategorię dla ticketów\n"
                               "`!setticketpanel #kanał` - ustawia kanał panelu ticketów\n"
                               "`!setticketfooter URL` - ustawia obrazek na dole ticketu\n"
+                              "`!setticketlogo URL` - ustawia logo w lewym górnym rogu\n"
                               "`!showconfig` - pokazuje konfigurację", 
                         inline=False)
     
