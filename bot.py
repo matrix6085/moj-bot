@@ -26,7 +26,8 @@ def load_config():
             "welcome_channel": None,
             "welcome_role": None,
             "ticket_category": None,
-            "ticket_panel_channel": None
+            "ticket_panel_channel": None,
+            "ticket_footer_image": None
         }
 
 def save_config(config):
@@ -91,6 +92,22 @@ active_tickets_lock = {}
 
 @bot.command()
 @commands.has_permissions(administrator=True)
+async def setticketfooter(ctx, url: str = None):
+    """Ustawia obrazek na dole ticketu (URL)
+    Użycie: !setticketfooter https://example.com/obrazek.png
+    Aby usunąć: !setticketfooter"""
+    config = load_config()
+    config["ticket_footer_image"] = url
+    save_config(config)
+    
+    if url:
+        await ctx.send(f"✅ Ustawiono obrazek ticketu")
+    else:
+        await ctx.send(f"✅ Usunięto obrazek ticketu")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
 async def setticketcategory(ctx, category_id: int):
     """Ustawia kategorię dla ticketów używając ID"""
     config = load_config()
@@ -119,7 +136,7 @@ async def setticketpanel(ctx, channel: discord.TextChannel):
 async def send_ticket_panel(channel):
     """Wysyła panel ticketów na wskazany kanał"""
     embed = discord.Embed(
-        title="🎫 System Ticketów",
+        title="🎫 Vireona Hub × TICKET",
         description="Kliknij przycisk poniżej, aby otworzyć ticket.",
         color=discord.Color.blue()
     )
@@ -195,15 +212,40 @@ async def create_ticket(interaction):
         tickets.append(ticket_data)
         save_tickets(tickets)
         
-        # Wyślij wiadomość powitalną w tickecie
-        embed = discord.Embed(
-            title="🎫 Ticket otwarty",
-            description=f"Witaj {interaction.user.mention}!",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="📝 Opisz swoją sprawę", value="Napisz poniżej swoją wiadomość. Administracja odpowie tak szybko jak to możliwe.", inline=False)
-        embed.add_field(name="🔒 Zamknięcie ticketu", value="Gdy sprawa zostanie rozwiązana, kliknij przycisk 'Zamknij Ticket' poniżej.", inline=False)
+        # ========== PIĘKNY EMBED TICKETU ==========
         
+        # Utwórz embed z niebieską linią po lewej (kolor 0x5865f2)
+        embed = discord.Embed(
+            title="🎫 Vireona Hub × TICKET",
+            color=0x5865f2  # Niebieski kolor Discord
+        )
+        
+        # Sekcja 1: Informacje o kliencie
+        embed.add_field(
+            name="🎫 Informacje o kliencie:",
+            value=f"🔔 Ping: {interaction.user.mention}\n🔔 Nick: {interaction.user.name}\n🔔 ID: `{interaction.user.id}`",
+            inline=False
+        )
+        
+        # Sekcja 2: Informacje o pomocy
+        embed.add_field(
+            name="🎫 Informacje o pomocy:",
+            value="📌 Wybrane podanie: Administracja\n\n📝 Opisz swoją sprawę poniżej. Administracja odpowie tak szybko jak to możliwe.",
+            inline=False
+        )
+        
+        # Dodaj obrazek na dole jeśli jest ustawiony
+        if config.get("ticket_footer_image"):
+            embed.set_image(url=config["ticket_footer_image"])
+        
+        # Dodaj stopkę z nazwą serwera i datą
+        current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+        embed.set_footer(
+            text=f"{interaction.guild.name} • {current_time}",
+            icon_url=interaction.guild.icon.url if interaction.guild.icon else None
+        )
+        
+        # Przycisk zamknięcia
         close_button = discord.ui.Button(label="🔒 Zamknij Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
         
         async def close_callback(interaction_close):
@@ -273,7 +315,7 @@ async def setwelcomechannel(ctx, channel: discord.TextChannel):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setwelcomerole(ctx, role: discord.Role):
-    """Ustawia rolę dla nowych członków (nadawana automatycznie przy wejściu)"""
+    """Ustawia rolę dla nowych członków"""
     config = load_config()
     config["welcome_role"] = role.id
     save_config(config)
@@ -319,6 +361,12 @@ async def showconfig(ctx):
     else:
         embed.add_field(name="📋 Kanał panelu ticketów", value="❌ Nie ustawiono", inline=False)
     
+    # Obrazek ticketu
+    if config["ticket_footer_image"]:
+        embed.add_field(name="🖼️ Obrazek ticketu", value="Ustawiony", inline=False)
+    else:
+        embed.add_field(name="🖼️ Obrazek ticketu", value="❌ Nie ustawiono", inline=False)
+    
     await ctx.send(embed=embed)
     await ctx.message.delete()
 
@@ -343,6 +391,7 @@ async def helpme(ctx):
                               "`!setwelcomerole @rola` - ustawia rolę dla nowych członków\n"
                               "`!setticketcategory ID` - ustawia kategorię dla ticketów\n"
                               "`!setticketpanel #kanał` - ustawia kanał panelu ticketów\n"
+                              "`!setticketfooter URL` - ustawia obrazek na dole ticketu\n"
                               "`!showconfig` - pokazuje konfigurację", 
                         inline=False)
     
