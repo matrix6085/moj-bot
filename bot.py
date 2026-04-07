@@ -22,7 +22,6 @@ if not os.path.exists(TRANSCRIPTS_FOLDER):
     os.makedirs(TRANSCRIPTS_FOLDER)
 
 def load_config():
-    """Wczytuje konfigurację serwera"""
     try:
         with open(CONFIG_FILE, "r") as f:
             return json.load(f)
@@ -33,16 +32,15 @@ def load_config():
             "ticket_category": None,
             "ticket_panel_channel": None,
             "ticket_footer_image": None,
-            "ticket_logo_url": None
+            "ticket_logo_url": None,
+            "claim_role": None
         }
 
 def save_config(config):
-    """Zapisuje konfigurację serwera"""
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f)
 
 def load_tickets():
-    """Wczytuje listę ticketów"""
     try:
         with open(TICKETS_FILE, "r") as f:
             return json.load(f)
@@ -50,14 +48,12 @@ def load_tickets():
         return []
 
 def save_tickets(tickets):
-    """Zapisuje listę ticketów"""
     with open(TICKETS_FILE, "w") as f:
         json.dump(tickets, f)
 
 # ========== FUNKCJE DO TRANSCRIPT ==========
 
 async def save_transcript(channel, ticket_id):
-    """Zapisuje transkrypt ticketu do pliku"""
     messages = []
     async for message in channel.history(limit=None, oldest_first=True):
         messages.append(message)
@@ -65,7 +61,6 @@ async def save_transcript(channel, ticket_id):
     if not messages:
         return None
     
-    # Przygotuj zawartość transkryptu
     transcript_lines = []
     transcript_lines.append(f"=== TRANSCRIPT TICKETU {ticket_id} ===")
     transcript_lines.append(f"Kanał: #{channel.name}")
@@ -79,7 +74,6 @@ async def save_transcript(channel, ticket_id):
         content = msg.content if msg.content else "[EMBED/ZAŁĄCZNIK]"
         transcript_lines.append(f"[{timestamp}] {author}: {content}")
         
-        # Dodaj załączniki jeśli są
         if msg.attachments:
             for att in msg.attachments:
                 transcript_lines.append(f"  → Załącznik: {att.url}")
@@ -88,7 +82,6 @@ async def save_transcript(channel, ticket_id):
     transcript_lines.append("=" * 50)
     transcript_lines.append(f"Koniec transkryptu - {len(messages)} wiadomości")
     
-    # Zapisz do pliku
     filename = f"{TRANSCRIPTS_FOLDER}/ticket_{ticket_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     with open(filename, "w", encoding="utf-8") as f:
         f.write("\n".join(transcript_lines))
@@ -96,12 +89,10 @@ async def save_transcript(channel, ticket_id):
     return filename
 
 async def send_transcript_to_user(user, filename, ticket_id):
-    """Wysyła transkrypt do użytkownika na PW"""
     try:
         with open(filename, "r", encoding="utf-8") as f:
             content = f.read()
         
-        # Jeśli plik jest za duży, wyślij jako załącznik
         if len(content) > 1900:
             await user.send(f"📋 **Transkrypt ticketu #{ticket_id}**")
             await user.send(file=discord.File(filename))
@@ -127,7 +118,6 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member):
-    """Wysyła powitanie gdy ktoś dołączy i nadaje rolę powitalną"""
     config = load_config()
     
     if config["welcome_role"]:
@@ -155,6 +145,17 @@ async def on_member_join(member):
 # ========== SYSTEM TICKETÓW ==========
 
 active_tickets_lock = {}
+claimed_tickets = {}
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setclaimrole(ctx, role: discord.Role):
+    """Ustawia rolę która może przejmować tickety"""
+    config = load_config()
+    config["claim_role"] = role.id
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono rolę do przejmowania ticketów na {role.mention}")
+    await ctx.message.delete()
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -195,26 +196,68 @@ async def setticketpanel(ctx, channel: discord.TextChannel):
     await ctx.message.delete()
 
 async def send_ticket_panel(channel):
+    """Wysyła panel ticketów na wskazany kanał"""
+    
+    # Główny embed panelu
     embed = discord.Embed(
-        title="🎫 Vireona Hub × TICKET",
-        description="Kliknij przycisk poniżej, aby otworzyć ticket.",
-        color=0x2b2d31
+        title="**KONTAKT Z ADMINISTRACJĄ**",
+        description="**Aby skontaktować się z Administracją, wybierz odpowiednią kategorię, z podanych poniżej, Twój bilet automatycznie zostanie dostarczony do osób zajmujących się Twoją sprawą.**",
+        color=0x5865f2
     )
-    embed.add_field(name="📝 Co to jest?", value="Ticket to prywatny kanał, gdzie możesz porozmawiać z administracją.", inline=False)
-    embed.add_field(name="🔧 Jak użyć?", value="Kliknij przycisk **'Otwórz Ticket'** poniżej.", inline=False)
-    embed.set_footer(text="Możesz mieć tylko jeden otwarty ticket na raz!")
+    embed.set_footer(text="Pingowanie Administracji równe jest z przerwą 7 dni na discordzie.")
     
+    # Dodaj obrazek jeśli jest ustawiony
+    config = load_config()
+    if config.get("ticket_footer_image"):
+        embed.set_image(url=config["ticket_footer_image"])
+    
+    # Przyciski kategorii
     view = discord.ui.View(timeout=None)
-    button = discord.ui.Button(label="🎫 Otwórz Ticket", style=discord.ButtonStyle.primary, custom_id="create_ticket")
     
-    async def button_callback(interaction):
-        await create_ticket(interaction)
+    # Przycisk Problem
+    problem_button = discord.ui.Button(label="❌ Problem", style=discord.ButtonStyle.danger, custom_id="category_problem")
+    wspolpraca_button = discord.ui.Button(label="🤝 Współpraca", style=discord.ButtonStyle.success, custom_id="category_wspolpraca")
+    kontakt_button = discord.ui.Button(label="📞 Kontakt z administracją", style=discord.ButtonStyle.primary, custom_id="category_kontakt")
     
-    button.callback = button_callback
-    view.add_item(button)
+    async def problem_callback(interaction):
+        await show_category_form(interaction, "Problem")
+    
+    async def wspolpraca_callback(interaction):
+        await show_category_form(interaction, "Współpraca")
+    
+    async def kontakt_callback(interaction):
+        await show_category_form(interaction, "Kontakt z administracją")
+    
+    problem_button.callback = problem_callback
+    wspolpraca_button.callback = wspolpraca_callback
+    kontakt_button.callback = kontakt_callback
+    
+    view.add_item(problem_button)
+    view.add_item(wspolpraca_button)
+    view.add_item(kontakt_button)
+    
     await channel.send(embed=embed, view=view)
 
-async def create_ticket(interaction):
+async def show_category_form(interaction, category):
+    """Pokazuje formularz dla wybranej kategorii"""
+    modal = discord.ui.Modal(title=f"Formularz - {category}")
+    
+    modal.add_item(discord.ui.TextInput(
+        label="Dodatkowe informacje",
+        placeholder="Napisz tutaj swoją sprawę...",
+        required=True,
+        style=discord.TextStyle.paragraph,
+        max_length=1000
+    ))
+    
+    async def modal_callback(interaction_modal):
+        await create_ticket(interaction_modal, category, modal.children[0].value)
+    
+    modal.on_submit = modal_callback
+    await interaction.response.send_modal(modal)
+
+async def create_ticket(interaction, category, additional_info):
+    """Tworzy nowy ticket z wybraną kategorią"""
     user_id = interaction.user.id
     if user_id in active_tickets_lock and active_tickets_lock[user_id]:
         await interaction.response.send_message("⏳ Twój ticket jest już w trakcie tworzenia!", ephemeral=True)
@@ -226,6 +269,7 @@ async def create_ticket(interaction):
         config = load_config()
         tickets = load_tickets()
         
+        # Sprawdź czy użytkownik ma już otwarty ticket
         for ticket in tickets:
             if ticket["user_id"] == interaction.user.id and ticket["status"] == "open":
                 channel = interaction.guild.get_channel(ticket["channel_id"])
@@ -235,23 +279,35 @@ async def create_ticket(interaction):
                     await interaction.response.send_message("❌ Masz już otwarty ticket!", ephemeral=True)
                 return
         
-        category = None
+        # Znajdź kategorię
+        category_channel = None
         if config["ticket_category"]:
-            category = interaction.guild.get_channel(config["ticket_category"])
+            category_channel = interaction.guild.get_channel(config["ticket_category"])
         
+        # Stwórz kanał ticketu
         overwrites = {
             interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         }
         
+        # Dodaj adminów
         for member in interaction.guild.members:
             if member.guild_permissions.administrator:
                 overwrites[member] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         
+        # Dodaj rolę która może przejmować tickety
+        claim_role_id = config.get("claim_role")
+        if claim_role_id:
+            claim_role = interaction.guild.get_role(claim_role_id)
+            if claim_role:
+                for member in interaction.guild.members:
+                    if claim_role in member.roles:
+                        overwrites[member] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        
         channel = await interaction.guild.create_text_channel(
             name=f"ticket-{interaction.user.name}",
-            category=category,
+            category=category_channel,
             overwrites=overwrites
         )
         
@@ -260,8 +316,11 @@ async def create_ticket(interaction):
             "id": ticket_id,
             "user_id": interaction.user.id,
             "channel_id": channel.id,
+            "category": category,
+            "additional_info": additional_info,
             "status": "open",
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now().isoformat(),
+            "claimed_by": None
         }
         tickets.append(ticket_data)
         save_tickets(tickets)
@@ -271,7 +330,6 @@ async def create_ticket(interaction):
         user_id_str = str(interaction.user.id)
         masked_id = f"||{user_id_str[:3]}XXXXXX{user_id_str[-3:]}||"
         
-        # Czarne tło na tytule
         title_text = "```\n🎫 Vireona Hub × TICKET\n```"
         
         logo_url = config.get("ticket_logo_url")
@@ -294,9 +352,10 @@ async def create_ticket(interaction):
             inline=False
         )
         
+        # Dodaj kategorię i dodatkowe informacje
         embed.add_field(
             name="**🎫 INFORMACJE O POMOCY:**",
-            value="> **📌 Wybrane podanie:** `Administracja`\n> \n> **📝 Opisz swoją sprawę poniżej.**\n> Administracja odpowie tak szybko jak to możliwe.",
+            value=f"> **📌 Kategoria:** `{category}`\n> \n> **📝 Dodatkowe informacje:**\n> {additional_info}",
             inline=False
         )
         
@@ -309,32 +368,95 @@ async def create_ticket(interaction):
             icon_url=interaction.guild.icon.url if interaction.guild.icon else None
         )
         
+        # Przyciski
+        view = discord.ui.View(timeout=None)
+        
+        claim_button = discord.ui.Button(label="🔧 Przejmij ticket", style=discord.ButtonStyle.secondary, custom_id="claim_ticket")
         close_button = discord.ui.Button(label="🔒 Zamknij Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
         
-        async def close_callback(interaction_close):
-            await close_ticket(interaction_close, channel, ticket_id)
+        async def claim_callback(interaction_claim):
+            await claim_ticket(interaction_claim, channel, ticket_id)
         
+        async def close_callback(interaction_close):
+            await show_close_reason(interaction_close, channel, ticket_id)
+        
+        claim_button.callback = claim_callback
         close_button.callback = close_callback
         
-        view = discord.ui.View(timeout=None)
+        view.add_item(claim_button)
         view.add_item(close_button)
         
-        # Ping bez dodatkowego tekstu
-        await channel.send(f"||@everyone||")
-        await channel.send(embed=embed, view=view)
+        # Wyślij wiadomość z pingiem i embedem razem
+        await channel.send(f"||@everyone||", embed=embed, view=view)
         await interaction.response.send_message(f"✅ Ticket został utworzony! {channel.mention}", ephemeral=True)
         
     finally:
         await asyncio.sleep(1)
         active_tickets_lock[user_id] = False
 
-async def close_ticket(interaction, channel, ticket_id):
-    """Zamyka ticket i zapisuje transkrypt"""
+async def claim_ticket(interaction, channel, ticket_id):
+    """Przejmuje ticket przez uprawnioną rolę"""
+    config = load_config()
+    claim_role_id = config.get("claim_role")
+    
+    if not claim_role_id:
+        await interaction.response.send_message("❌ Nie ustawiono roli do przejmowania ticketów!", ephemeral=True)
+        return
+    
+    claim_role = interaction.guild.get_role(claim_role_id)
+    if not claim_role or claim_role not in interaction.user.roles:
+        await interaction.response.send_message("❌ Nie masz uprawnień do przejmowania ticketów!", ephemeral=True)
+        return
+    
     tickets = load_tickets()
+    for ticket in tickets:
+        if ticket["id"] == ticket_id:
+            ticket["claimed_by"] = interaction.user.id
+            break
+    
+    save_tickets(tickets)
+    claimed_tickets[channel.id] = interaction.user.id
+    
+    embed = discord.Embed(
+        title="🔧 Ticket przejęty",
+        description=f"Ticket został przejęty przez {interaction.user.mention}",
+        color=discord.Color.green()
+    )
+    await channel.send(embed=embed)
+    await interaction.response.send_message("✅ Przejąłeś ticket!", ephemeral=True)
+
+async def show_close_reason(interaction, channel, ticket_id):
+    """Pokazuje formularz z powodem zamknięcia"""
+    modal = discord.ui.Modal(title="Powód zamknięcia ticketu")
+    
+    modal.add_item(discord.ui.TextInput(
+        label="Podaj powód zamknięcia",
+        placeholder="Np. Sprawa rozwiązana, Brak odpowiedzi itp.",
+        required=True,
+        style=discord.TextStyle.paragraph,
+        max_length=500
+    ))
+    
+    async def modal_callback(interaction_modal):
+        await close_ticket(interaction_modal, channel, ticket_id, modal.children[0].value)
+    
+    modal.on_submit = modal_callback
+    await interaction.response.send_modal(modal)
+
+async def close_ticket(interaction, channel, ticket_id, reason):
+    """Zamyka ticket i zapisuje transkrypt"""
+    
+    # Wyślij wiadomość z ładowaniem (kręcące się kółko)
+    loading_msg = await channel.send("⏳ **Zamykanie ticketu...** <a:loading:>")
+    
+    tickets = load_tickets()
+    user_id = None
     
     for ticket in tickets:
         if ticket["id"] == ticket_id:
             ticket["status"] = "closed"
+            ticket["close_reason"] = reason
+            user_id = ticket["user_id"]
             break
     
     save_tickets(tickets)
@@ -342,20 +464,17 @@ async def close_ticket(interaction, channel, ticket_id):
     # Zapisz transkrypt
     transcript_file = await save_transcript(channel, ticket_id)
     
-    # Wyślij transkrypt do użytkownika
-    user = interaction.guild.get_member(ticket["user_id"])
+    # Wyślij transkrypt do użytkownika (tylko raz)
+    user = interaction.guild.get_member(user_id)
     if user and transcript_file:
         await send_transcript_to_user(user, transcript_file, ticket_id)
     
-    # Wyślij transkrypt na kanał admina (opcjonalnie)
-    # Możesz dodać kanał do zapisywania transkryptów
-    
     embed = discord.Embed(
         title="🔒 Ticket zamknięty",
-        description=f"Ten ticket zostanie usunięty za 5 sekund.\nTranskrypt został wysłany na PW.",
+        description=f"**Powód zamknięcia:** {reason}\n\nTen ticket zostanie usunięty za 5 sekund.\nTranskrypt został wysłany na PW.",
         color=discord.Color.red()
     )
-    await channel.send(embed=embed)
+    await loading_msg.edit(content="", embed=embed)
     
     try:
         await interaction.response.send_message("✅ Ticket zostanie zamknięty.", ephemeral=True)
@@ -368,19 +487,26 @@ async def close_ticket(interaction, channel, ticket_id):
 @bot.event
 async def on_interaction(interaction):
     if interaction.type == discord.InteractionType.component:
-        if interaction.data["custom_id"] == "create_ticket":
-            await create_ticket(interaction)
-        elif interaction.data["custom_id"] == "close_ticket":
+        if interaction.data["custom_id"] == "category_problem":
+            await show_category_form(interaction, "Problem")
+        elif interaction.data["custom_id"] == "category_wspolpraca":
+            await show_category_form(interaction, "Współpraca")
+        elif interaction.data["custom_id"] == "category_kontakt":
+            await show_category_form(interaction, "Kontakt z administracją")
+        elif interaction.data["custom_id"] == "claim_ticket":
             channel = interaction.channel
-            # Znajdź ID ticketu
             tickets = load_tickets()
-            ticket_id = None
             for ticket in tickets:
                 if ticket["channel_id"] == channel.id:
-                    ticket_id = ticket["id"]
+                    await claim_ticket(interaction, channel, ticket["id"])
                     break
-            if ticket_id:
-                await close_ticket(interaction, channel, ticket_id)
+        elif interaction.data["custom_id"] == "close_ticket":
+            channel = interaction.channel
+            tickets = load_tickets()
+            for ticket in tickets:
+                if ticket["channel_id"] == channel.id:
+                    await show_close_reason(interaction, channel, ticket["id"])
+                    break
 
 # ========== KONFIGURACJA SERWERA ==========
 
@@ -419,13 +545,13 @@ async def showconfig(ctx):
         embed.add_field(name="📢 Kanał powitalny", value="❌ Nie ustawiono", inline=False)
     
     if config["welcome_role"]:
-        role = ctx.guild.get_role(config["welcome_role"])
+        role = interaction.guild.get_role(config["welcome_role"])
         embed.add_field(name="🎭 Rola dla nowych", value=role.mention if role else "Nie znaleziono", inline=False)
     else:
         embed.add_field(name="🎭 Rola dla nowych", value="❌ Nie ustawiono", inline=False)
     
     if config["ticket_category"]:
-        category = ctx.guild.get_channel(config["ticket_category"])
+        category = interaction.guild.get_channel(config["ticket_category"])
         embed.add_field(name="🎫 Kategoria ticketów", value=category.name if category else "Nie znaleziono", inline=False)
     else:
         embed.add_field(name="🎫 Kategoria ticketów", value="❌ Nie ustawiono", inline=False)
@@ -446,6 +572,12 @@ async def showconfig(ctx):
     else:
         embed.add_field(name="🖼️ Logo ticketu", value="❌ Nie ustawiono", inline=False)
     
+    if config["claim_role"]:
+        role = interaction.guild.get_role(config["claim_role"])
+        embed.add_field(name="🔧 Rola do przejmowania ticketów", value=role.mention if role else "Nie znaleziono", inline=False)
+    else:
+        embed.add_field(name="🔧 Rola do przejmowania ticketów", value="❌ Nie ustawiono", inline=False)
+    
     await ctx.send(embed=embed)
     await ctx.message.delete()
 
@@ -465,12 +597,13 @@ async def helpme(ctx):
     
     if ctx.author.guild_permissions.administrator:
         embed.add_field(name="⚙️ Konfiguracja (admin):", 
-                        value="`!setwelcomechannel #kanał` - ustawia kanał powitalny\n"
-                              "`!setwelcomerole @rola` - ustawia rolę dla nowych członków\n"
-                              "`!setticketcategory ID` - ustawia kategorię dla ticketów\n"
-                              "`!setticketpanel #kanał` - ustawia kanał panelu ticketów\n"
-                              "`!setticketfooter URL` - ustawia obrazek na dole ticketu\n"
-                              "`!setticketlogo URL` - ustawia logo w lewym górnym rogu\n"
+                        value="`!setwelcomechannel #kanał` - kanał powitalny\n"
+                              "`!setwelcomerole @rola` - rola dla nowych\n"
+                              "`!setticketcategory ID` - kategoria ticketów\n"
+                              "`!setticketpanel #kanał` - panel ticketów\n"
+                              "`!setticketfooter URL` - obrazek na dole\n"
+                              "`!setticketlogo URL` - logo w lewym górnym rogu\n"
+                              "`!setclaimrole @rola` - rola do przejmowania ticketów\n"
                               "`!showconfig` - pokazuje konfigurację", 
                         inline=False)
     
