@@ -33,7 +33,11 @@ def load_config():
             "ticket_panel_channel": None,
             "ticket_footer_image": None,
             "ticket_logo_url": None,
-            "claim_role": None
+            "ticket_panel_image": None,
+            "claim_role": None,
+            "problem_emoji": "❌",
+            "wspolpraca_emoji": "🤝",
+            "kontakt_emoji": "📞"
         }
 
 def save_config(config):
@@ -150,7 +154,6 @@ claimed_tickets = {}
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setclaimrole(ctx, role: discord.Role):
-    """Ustawia rolę która może przejmować tickety"""
     config = load_config()
     config["claim_role"] = role.id
     save_config(config)
@@ -177,6 +180,46 @@ async def setticketlogo(ctx, url: str = None):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
+async def setticketpanelimage(ctx, url: str = None):
+    """Ustawia obrazek w panelu ticketów pod przyciskami"""
+    config = load_config()
+    config["ticket_panel_image"] = url
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono obrazek panelu ticketów" if url else "✅ Usunięto obrazek panelu ticketów")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setproblememoji(ctx, emoji: str):
+    """Ustawia emotkę dla przycisku Problem"""
+    config = load_config()
+    config["problem_emoji"] = emoji
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono emotkę dla Problemu: {emoji}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setwspolpracaemoji(ctx, emoji: str):
+    """Ustawia emotkę dla przycisku Współpraca"""
+    config = load_config()
+    config["wspolpraca_emoji"] = emoji
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono emotkę dla Współpracy: {emoji}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setkontaktemoji(ctx, emoji: str):
+    """Ustawia emotkę dla przycisku Kontakt z administracją"""
+    config = load_config()
+    config["kontakt_emoji"] = emoji
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono emotkę dla Kontaktu: {emoji}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
 async def setticketcategory(ctx, category_id: int):
     config = load_config()
     config["ticket_category"] = category_id
@@ -197,6 +240,7 @@ async def setticketpanel(ctx, channel: discord.TextChannel):
 
 async def send_ticket_panel(channel):
     """Wysyła panel ticketów na wskazany kanał"""
+    config = load_config()
     
     # Główny embed panelu
     embed = discord.Embed(
@@ -204,20 +248,24 @@ async def send_ticket_panel(channel):
         description="**Aby skontaktować się z Administracją, wybierz odpowiednią kategorię, z podanych poniżej, Twój bilet automatycznie zostanie dostarczony do osób zajmujących się Twoją sprawą.**",
         color=0x5865f2
     )
+    
+    # Dodaj obrazek panelu jeśli jest ustawiony
+    if config.get("ticket_panel_image"):
+        embed.set_image(url=config["ticket_panel_image"])
+    
     embed.set_footer(text="Pingowanie Administracji równe jest z przerwą 7 dni na discordzie.")
     
-    # Dodaj obrazek jeśli jest ustawiony
-    config = load_config()
-    if config.get("ticket_footer_image"):
-        embed.set_image(url=config["ticket_footer_image"])
-    
-    # Przyciski kategorii
+    # Przyciski kategorii (szare - secondary)
     view = discord.ui.View(timeout=None)
     
-    # Przycisk Problem
-    problem_button = discord.ui.Button(label="❌ Problem", style=discord.ButtonStyle.danger, custom_id="category_problem")
-    wspolpraca_button = discord.ui.Button(label="🤝 Współpraca", style=discord.ButtonStyle.success, custom_id="category_wspolpraca")
-    kontakt_button = discord.ui.Button(label="📞 Kontakt z administracją", style=discord.ButtonStyle.primary, custom_id="category_kontakt")
+    # Pobierz emotki z configu
+    problem_emoji = config.get("problem_emoji", "❌")
+    wspolpraca_emoji = config.get("wspolpraca_emoji", "🤝")
+    kontakt_emoji = config.get("kontakt_emoji", "📞")
+    
+    problem_button = discord.ui.Button(label="Problem", style=discord.ButtonStyle.secondary, custom_id="category_problem", emoji=problem_emoji)
+    wspolpraca_button = discord.ui.Button(label="Współpraca", style=discord.ButtonStyle.secondary, custom_id="category_wspolpraca", emoji=wspolpraca_emoji)
+    kontakt_button = discord.ui.Button(label="Kontakt z administracją", style=discord.ButtonStyle.secondary, custom_id="category_kontakt", emoji=kontakt_emoji)
     
     async def problem_callback(interaction):
         await show_category_form(interaction, "Problem")
@@ -330,6 +378,7 @@ async def create_ticket(interaction, category, additional_info):
         user_id_str = str(interaction.user.id)
         masked_id = f"||{user_id_str[:3]}XXXXXX{user_id_str[-3:]}||"
         
+        # Czarna ramka na tytule
         title_text = "```\n🎫 Vireona Hub × TICKET\n```"
         
         logo_url = config.get("ticket_logo_url")
@@ -342,13 +391,12 @@ async def create_ticket(interaction, category, additional_info):
         if logo_url:
             embed.set_thumbnail(url=logo_url)
         
-        # Dopasowanie długości nicku
-        nick_length = len(interaction.user.name)
-        nick_spacing = " " * (20 - nick_length) if nick_length < 20 else ""
+        # Czarna ramka na nicku
+        nick_text = f"```\n{interaction.user.name}\n```"
         
         embed.add_field(
             name="**🎫 INFORMACJE O KLIENCIE:**",
-            value=f"> **🔔 Ping:** {interaction.user.mention}\n> **🔔 Nick:** **{interaction.user.name}**{nick_spacing}\n> **🔔 ID:** {masked_id}",
+            value=f"> **🔔 Ping:** {interaction.user.mention}\n> **🔔 Nick:** {nick_text}\n> **🔔 ID:** {masked_id}",
             inline=False
         )
         
@@ -446,7 +494,7 @@ async def show_close_reason(interaction, channel, ticket_id):
 async def close_ticket(interaction, channel, ticket_id, reason):
     """Zamyka ticket i zapisuje transkrypt"""
     
-    # Wyślij wiadomość z ładowaniem (kręcące się kółko)
+    # Wyślij wiadomość z ładowaniem
     loading_msg = await channel.send("⏳ **Zamykanie ticketu...** <a:loading:>")
     
     tickets = load_tickets()
@@ -545,13 +593,13 @@ async def showconfig(ctx):
         embed.add_field(name="📢 Kanał powitalny", value="❌ Nie ustawiono", inline=False)
     
     if config["welcome_role"]:
-        role = interaction.guild.get_role(config["welcome_role"])
+        role = ctx.guild.get_role(config["welcome_role"])
         embed.add_field(name="🎭 Rola dla nowych", value=role.mention if role else "Nie znaleziono", inline=False)
     else:
         embed.add_field(name="🎭 Rola dla nowych", value="❌ Nie ustawiono", inline=False)
     
     if config["ticket_category"]:
-        category = interaction.guild.get_channel(config["ticket_category"])
+        category = ctx.guild.get_channel(config["ticket_category"])
         embed.add_field(name="🎫 Kategoria ticketów", value=category.name if category else "Nie znaleziono", inline=False)
     else:
         embed.add_field(name="🎫 Kategoria ticketów", value="❌ Nie ustawiono", inline=False)
@@ -572,11 +620,18 @@ async def showconfig(ctx):
     else:
         embed.add_field(name="🖼️ Logo ticketu", value="❌ Nie ustawiono", inline=False)
     
-    if config["claim_role"]:
-        role = interaction.guild.get_role(config["claim_role"])
-        embed.add_field(name="🔧 Rola do przejmowania ticketów", value=role.mention if role else "Nie znaleziono", inline=False)
+    if config["ticket_panel_image"]:
+        embed.add_field(name="🖼️ Obrazek panelu", value="Ustawiony", inline=False)
     else:
-        embed.add_field(name="🔧 Rola do przejmowania ticketów", value="❌ Nie ustawiono", inline=False)
+        embed.add_field(name="🖼️ Obrazek panelu", value="❌ Nie ustawiono", inline=False)
+    
+    if config["claim_role"]:
+        role = ctx.guild.get_role(config["claim_role"])
+        embed.add_field(name="🔧 Rola do przejmowania", value=role.mention if role else "Nie znaleziono", inline=False)
+    else:
+        embed.add_field(name="🔧 Rola do przejmowania", value="❌ Nie ustawiono", inline=False)
+    
+    embed.add_field(name="😀 Emotki przycisków", value=f"Problem: {config.get('problem_emoji', '❌')}\nWspółpraca: {config.get('wspolpraca_emoji', '🤝')}\nKontakt: {config.get('kontakt_emoji', '📞')}", inline=False)
     
     await ctx.send(embed=embed)
     await ctx.message.delete()
@@ -601,9 +656,13 @@ async def helpme(ctx):
                               "`!setwelcomerole @rola` - rola dla nowych\n"
                               "`!setticketcategory ID` - kategoria ticketów\n"
                               "`!setticketpanel #kanał` - panel ticketów\n"
-                              "`!setticketfooter URL` - obrazek na dole\n"
+                              "`!setticketfooter URL` - obrazek na dole ticketu\n"
                               "`!setticketlogo URL` - logo w lewym górnym rogu\n"
-                              "`!setclaimrole @rola` - rola do przejmowania ticketów\n"
+                              "`!setticketpanelimage URL` - obrazek w panelu\n"
+                              "`!setclaimrole @rola` - rola do przejmowania\n"
+                              "`!setproblememoji 😀` - emotka Problemu\n"
+                              "`!setwspolpracaemoji 😀` - emotka Współpracy\n"
+                              "`!setkontaktemoji 😀` - emotka Kontaktu\n"
                               "`!showconfig` - pokazuje konfigurację", 
                         inline=False)
     
