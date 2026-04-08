@@ -40,7 +40,9 @@ def load_config():
             "verification_channel": None,
             "verification_image": None,
             "verification_emoji": "✅",
-            "close_ticket_emoji": "🔒"
+            "close_ticket_emoji": "🔒",
+            "member_count_channel": None,
+            "member_count_update_interval": 600
         }
 
 def save_config(config):
@@ -96,6 +98,30 @@ async def send_transcript_to_user(user, filename, ticket_id):
         return True
     except:
         return False
+
+# --------------------- LICZNIK CZŁONKÓW (KANAŁ GŁOSOWY) ---------------------
+async def update_member_count_channel(guild, channel):
+    """Aktualizuje nazwę kanału głosowego na aktualną liczbę członków"""
+    try:
+        member_count = guild.member_count
+        new_name = f"👥 {member_count} członków"
+        if channel.name != new_name:
+            await channel.edit(name=new_name)
+            print(f"Zaktualizowano kanał {channel.name} na {new_name}")
+    except Exception as e:
+        print(f"Błąd aktualizacji kanału licznika: {e}")
+
+async def member_count_updater():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        config = load_config()
+        channel_id = config.get("member_count_channel")
+        interval = config.get("member_count_update_interval", 600)
+        if channel_id:
+            channel = bot.get_channel(channel_id)
+            if channel and isinstance(channel, discord.VoiceChannel):
+                await update_member_count_channel(channel.guild, channel)
+        await asyncio.sleep(interval)
 
 # --------------------- ZDARZENIE POWITANIA ---------------------
 @bot.event
@@ -242,7 +268,6 @@ async def setcloseticketemoji(ctx, emoji: str):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setverifychannel(ctx, channel: discord.TextChannel):
-    """Ustawia kanał dla panelu weryfikacji"""
     config = load_config()
     config["verification_channel"] = channel.id
     save_config(config)
@@ -252,7 +277,6 @@ async def setverifychannel(ctx, channel: discord.TextChannel):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setverifyimage(ctx, url: str = None):
-    """Ustawia obrazek w panelu weryfikacji (URL). Bez argumentu – usuwa."""
     config = load_config()
     config["verification_image"] = url
     save_config(config)
@@ -262,7 +286,6 @@ async def setverifyimage(ctx, url: str = None):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setverifyemoji(ctx, emoji: str):
-    """Ustawia emotkę dla przycisku weryfikacji"""
     config = load_config()
     config["verification_emoji"] = emoji
     save_config(config)
@@ -272,7 +295,6 @@ async def setverifyemoji(ctx, emoji: str):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def sendverifypanel(ctx):
-    """Ręcznie wysyła panel weryfikacji na ustawiony kanał"""
     config = load_config()
     channel_id = config.get("verification_channel")
     if not channel_id:
@@ -306,6 +328,33 @@ async def setticketpanel(ctx, channel: discord.TextChannel):
     save_config(config)
     await send_ticket_panel(channel)
     await ctx.send(f"✅ Panel ticketów został wysłany na {channel.mention}")
+    await ctx.message.delete()
+
+# --- Nowe komendy dla licznika członków ---
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setmembercountchannel(ctx, channel: discord.VoiceChannel):
+    """Ustawia kanał głosowy, który będzie wyświetlał liczbę członków"""
+    config = load_config()
+    config["member_count_channel"] = channel.id
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono kanał licznika członków na {channel.mention}")
+    await ctx.message.delete()
+    # Od razu wykonaj aktualizację
+    await update_member_count_channel(channel.guild, channel)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setmembercountinterval(ctx, seconds: int):
+    """Ustawia interwał aktualizacji licznika w sekundach (minimum 60)"""
+    if seconds < 60:
+        await ctx.send("❌ Interwał nie może być krótszy niż 60 sekund.")
+        await ctx.message.delete()
+        return
+    config = load_config()
+    config["member_count_update_interval"] = seconds
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono interwał aktualizacji licznika na {seconds} sekund.")
     await ctx.message.delete()
 
 @bot.command()
@@ -349,6 +398,12 @@ async def showconfig(ctx):
     else:
         embed.add_field(name="🔐 Kanał weryfikacji", value="❌ Nie ustawiono", inline=False)
     embed.add_field(name="✅ Emotka weryfikacji", value=config.get("verification_emoji", "✅"), inline=False)
+    if config.get("member_count_channel"):
+        ch = bot.get_channel(config["member_count_channel"])
+        embed.add_field(name="📊 Kanał licznika członków", value=ch.mention if ch else "Nie znaleziono", inline=False)
+    else:
+        embed.add_field(name="📊 Kanał licznika członków", value="❌ Nie ustawiono", inline=False)
+    embed.add_field(name="⏱️ Interwał aktualizacji", value=f"{config.get('member_count_update_interval', 600)} sekund", inline=False)
     await ctx.send(embed=embed)
     await ctx.message.delete()
 
@@ -647,10 +702,19 @@ async def helpme(ctx):
                               "`!setticketlogo URL`\n`!setticketpanelimage URL`\n`!setclaimrole @rola`\n"
                               "`!setproblememoji 😀`\n`!setwspolpracaemoji 😀`\n`!setkontaktemoji 😀`\n"
                               "`!setcloseticketemoji 😀`\n`!setverifychannel #kanał`\n`!setverifyimage URL`\n"
-                              "`!setverifyemoji 😀`\n`!sendverifypanel`\n`!showconfig`", inline=False)
+                              "`!setverifyemoji 😀`\n`!sendverifypanel`\n`!setmembercountchannel #głosowy`\n"
+                              "`!setmembercountinterval sekundy`\n`!showconfig`", inline=False)
     await ctx.send(embed=embed)
 
 # --------------------- START ---------------------
+@bot.event
+async def on_ready():
+    print(f"✅ Zalogowano jako {bot.user}")
+    print(f"🌐 Bot działa na {len(bot.guilds)} serwerach")
+    print("------")
+    # Uruchom updater licznika członków
+    bot.loop.create_task(member_count_updater())
+
 if __name__ == "__main__":
     try:
         bot.run(TOKEN)
