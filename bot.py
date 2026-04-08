@@ -36,7 +36,11 @@ def load_config():
             "claim_role": None,
             "problem_emoji": "❌",
             "wspolpraca_emoji": "🤝",
-            "kontakt_emoji": "📞"
+            "kontakt_emoji": "📞",
+            "verification_channel": None,
+            "verification_image": None,
+            "verification_emoji": "✅",
+            "close_ticket_emoji": "🔒"
         }
 
 def save_config(config):
@@ -97,7 +101,7 @@ async def send_transcript_to_user(user, filename, ticket_id):
 @bot.event
 async def on_member_join(member):
     config = load_config()
-    # Nadanie roli
+    # Nadanie roli powitalnej
     if config.get("welcome_role"):
         role = member.guild.get_role(config["welcome_role"])
         if role:
@@ -227,6 +231,65 @@ async def setkontaktemoji(ctx, emoji: str):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
+async def setcloseticketemoji(ctx, emoji: str):
+    """Ustawia emotkę dla przycisku 'Zamknij Ticket'"""
+    config = load_config()
+    config["close_ticket_emoji"] = emoji
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono emotkę zamknięcia ticketu: {emoji}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setverifychannel(ctx, channel: discord.TextChannel):
+    """Ustawia kanał dla panelu weryfikacji"""
+    config = load_config()
+    config["verification_channel"] = channel.id
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono kanał weryfikacji na {channel.mention}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setverifyimage(ctx, url: str = None):
+    """Ustawia obrazek w panelu weryfikacji (URL). Bez argumentu – usuwa."""
+    config = load_config()
+    config["verification_image"] = url
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono obrazek weryfikacji" if url else "✅ Usunięto obrazek weryfikacji")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setverifyemoji(ctx, emoji: str):
+    """Ustawia emotkę dla przycisku weryfikacji"""
+    config = load_config()
+    config["verification_emoji"] = emoji
+    save_config(config)
+    await ctx.send(f"✅ Ustawiono emotkę weryfikacji: {emoji}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def sendverifypanel(ctx):
+    """Ręcznie wysyła panel weryfikacji na ustawiony kanał"""
+    config = load_config()
+    channel_id = config.get("verification_channel")
+    if not channel_id:
+        await ctx.send("❌ Najpierw ustaw kanał za pomocą `!setverifychannel #kanał`")
+        await ctx.message.delete()
+        return
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        await ctx.send("❌ Nie znaleziono kanału")
+        await ctx.message.delete()
+        return
+    await send_verify_panel(channel)
+    await ctx.send(f"✅ Panel weryfikacji wysłany na {channel.mention}")
+    await ctx.message.delete()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
 async def setticketcategory(ctx, category_id: int):
     config = load_config()
     config["ticket_category"] = category_id
@@ -279,10 +342,17 @@ async def showconfig(ctx):
     else:
         embed.add_field(name="🔧 Rola do przejmowania", value="❌ Nie ustawiono", inline=False)
     embed.add_field(name="😀 Emotki przycisków", value=f"Problem: {config.get('problem_emoji', '❌')}\nWspółpraca: {config.get('wspolpraca_emoji', '🤝')}\nKontakt: {config.get('kontakt_emoji', '📞')}", inline=False)
+    embed.add_field(name="🔒 Emotka zamknięcia ticketu", value=config.get("close_ticket_emoji", "🔒"), inline=False)
+    if config.get("verification_channel"):
+        ch = bot.get_channel(config["verification_channel"])
+        embed.add_field(name="🔐 Kanał weryfikacji", value=ch.mention if ch else "Nie znaleziono", inline=False)
+    else:
+        embed.add_field(name="🔐 Kanał weryfikacji", value="❌ Nie ustawiono", inline=False)
+    embed.add_field(name="✅ Emotka weryfikacji", value=config.get("verification_emoji", "✅"), inline=False)
     await ctx.send(embed=embed)
     await ctx.message.delete()
 
-# --------------------- PANEL I TICKETY ---------------------
+# --------------------- PANEL TICKETÓW ---------------------
 active_tickets_lock = {}
 claimed_tickets = {}
 
@@ -403,7 +473,8 @@ async def create_ticket(interaction, category, additional_info):
         )
         view = discord.ui.View(timeout=None)
         claim_btn = discord.ui.Button(label="🔧 Przejmij ticket", style=discord.ButtonStyle.secondary, custom_id="claim_ticket")
-        close_btn = discord.ui.Button(label="🔒 Zamknij Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket")
+        close_emoji = config.get("close_ticket_emoji", "🔒")
+        close_btn = discord.ui.Button(label="Zamknij Ticket", style=discord.ButtonStyle.danger, custom_id="close_ticket", emoji=close_emoji)
         async def claim_cb(interaction_claim):
             await claim_ticket(interaction_claim, channel, ticket_id)
         async def close_cb(interaction_close):
@@ -481,6 +552,48 @@ async def close_ticket(interaction, channel, ticket_id, reason):
     await asyncio.sleep(5)
     await channel.delete()
 
+# --------------------- PANEL WERYFIKACJI ---------------------
+async def send_verify_panel(channel):
+    config = load_config()
+    embed = discord.Embed(
+        title="✅ **Weryfikacja!**",
+        description="Kliknij przycisk poniżej, aby potwierdzić, że nie jesteś robotem i uzyskać dostęp do serwera.",
+        color=0x5865f2
+    )
+    if config.get("verification_image"):
+        embed.set_image(url=config["verification_image"])
+    embed.set_footer(text="Po weryfikacji otrzymasz rolę dostępu.")
+    
+    view = discord.ui.View(timeout=None)
+    button = discord.ui.Button(
+        label="Weryfikuj",
+        style=discord.ButtonStyle.secondary,
+        custom_id="verify_button",
+        emoji=config.get("verification_emoji", "✅")
+    )
+    async def verify_callback(interaction):
+        await verify_user(interaction)
+    button.callback = verify_callback
+    view.add_item(button)
+    await channel.send(embed=embed, view=view)
+
+async def verify_user(interaction):
+    role_id = 1490245435191984269
+    role = interaction.guild.get_role(role_id)
+    if not role:
+        await interaction.response.send_message("❌ Rola weryfikacyjna nie istnieje! Skontaktuj się z administratorem.", ephemeral=True)
+        return
+    member = interaction.user
+    if role in member.roles:
+        await interaction.response.send_message("✅ Jesteś już zweryfikowany!", ephemeral=True)
+        return
+    try:
+        await member.add_roles(role)
+        await interaction.response.send_message("✅ **Zweryfikowano!** Uzyskałeś dostęp do serwera.", ephemeral=True)
+    except:
+        await interaction.response.send_message("❌ Nie udało się nadać roli. Spróbuj ponownie później.", ephemeral=True)
+
+# --------------------- OBSŁUGA INTERAKCJI ---------------------
 @bot.event
 async def on_interaction(interaction):
     if interaction.type == discord.InteractionType.component:
@@ -505,6 +618,8 @@ async def on_interaction(interaction):
                 if t["channel_id"] == channel.id:
                     await show_close_reason(interaction, channel, t["id"])
                     break
+        elif custom_id == "verify_button":
+            await verify_user(interaction)
 
 # --------------------- PODSTAWOWE KOMENDY ---------------------
 @bot.command()
@@ -527,7 +642,12 @@ async def helpme(ctx):
     embed.add_field(name="📌 Podstawowe", value="`!ping`, `!hello`, `!helpme`", inline=False)
     if ctx.author.guild_permissions.administrator:
         embed.add_field(name="⚙️ Konfiguracja (admin)", 
-                        value="`!setwelcomechannel #kanał`\n`!setwelcomerole @rola`\n`!setwelcomeimage URL`\n`!setticketcategory ID`\n`!setticketpanel #kanał`\n`!setticketfooter URL`\n`!setticketlogo URL`\n`!setticketpanelimage URL`\n`!setclaimrole @rola`\n`!setproblememoji 😀`\n`!setwspolpracaemoji 😀`\n`!setkontaktemoji 😀`\n`!showconfig`", inline=False)
+                        value="`!setwelcomechannel #kanał`\n`!setwelcomerole @rola`\n`!setwelcomeimage URL`\n"
+                              "`!setticketcategory ID`\n`!setticketpanel #kanał`\n`!setticketfooter URL`\n"
+                              "`!setticketlogo URL`\n`!setticketpanelimage URL`\n`!setclaimrole @rola`\n"
+                              "`!setproblememoji 😀`\n`!setwspolpracaemoji 😀`\n`!setkontaktemoji 😀`\n"
+                              "`!setcloseticketemoji 😀`\n`!setverifychannel #kanał`\n`!setverifyimage URL`\n"
+                              "`!setverifyemoji 😀`\n`!sendverifypanel`\n`!showconfig`", inline=False)
     await ctx.send(embed=embed)
 
 # --------------------- START ---------------------
