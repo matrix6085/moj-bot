@@ -104,7 +104,7 @@ async def update_member_count_channel(guild, channel):
     """Aktualizuje nazwę kanału głosowego na aktualną liczbę członków"""
     try:
         member_count = guild.member_count
-        new_name = f"👥 {member_count} członków"
+        new_name = f"「📍」People :{member_count} "
         if channel.name != new_name:
             await channel.edit(name=new_name)
             print(f"Zaktualizowano kanał {channel.name} na {new_name}")
@@ -722,3 +722,4 @@ if __name__ == "__main__":
         print("❌ BŁĄD: Nieprawidłowy token!")
     except Exception as e:
         print(f"❌ BŁĄD: {e}")
+        
