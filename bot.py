@@ -376,9 +376,9 @@ async def create_ticket(interaction, category, additional_info):
         # ========== PIĘKNY EMBED TICKETU ==========
         
         user_id_str = str(interaction.user.id)
-        masked_id = f"||{user_id_str[:3]}XXXXXX{user_id_str[-3:]}||"
+        masked_id = f"`{user_id_str}`"
         
-        # Czarna ramka na tytule
+        # Tytuł z czarną ramką
         title_text = "```\n🎫 Vireona Hub × TICKET\n```"
         
         logo_url = config.get("ticket_logo_url")
@@ -391,7 +391,7 @@ async def create_ticket(interaction, category, additional_info):
         if logo_url:
             embed.set_thumbnail(url=logo_url)
         
-        # Czarna ramka na nicku
+        # Nick z widoczną czarną ramką
         nick_text = f"```\n{interaction.user.name}\n```"
         
         embed.add_field(
